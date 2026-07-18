@@ -1,0 +1,12 @@
+name: delivery_khata
+description: Delivery Khata App
+version: 1.0.0
+environment: {sdk: '>=3.0.0 <4.0.0'}
+dependencies:
+  flutter: {sdk: flutter}
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  url_launcher: ^6.2.1
+  pdf: ^3.10.7
+  printing: ^5.11.1
+flutter: {uses-material-design: true}
