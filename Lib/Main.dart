@@ -1,18 +1,255 @@
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:hydrated_bloc/hydrated_bloc.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
+
+// ==========================================
+// 1. MODELS & DATA STRUCTURES
+// ==========================================
+
+class DeliveryOrder {
+  final String id;
+  final String customerName;
+  final String phoneNumber;
+  final double billAmount;
+  final String paymentMode; // Cash, Bank, EasyPaisa, JazzCash, Udhar
+  final String status;      // Paid, Pending
+  final DateTime dateTime;
+
+  DeliveryOrder({
+    required this.id,
+    required this.customerName,
+    required this.phoneNumber,
+    required this.billAmount,
+    required this.paymentMode,
+    required this.status,
+    required this.dateTime,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'customerName': customerName,
+      'phoneNumber': phoneNumber,
+      'billAmount': billAmount,
+      'paymentMode': paymentMode,
+      'status': status,
+      'dateTime': dateTime.toIso8601String(),
+    };
+  }
+
+  factory DeliveryOrder.fromMap(Map<String, dynamic> map) {
+    return DeliveryOrder(
+      id: map['id'] ?? '',
+      customerName: map['customerName'] ?? '',
+      phoneNumber: map['phoneNumber'] ?? '',
+      billAmount: (map['billAmount'] as num?)?.toDouble() ?? 0.0,
+      paymentMode: map['paymentMode'] ?? 'Cash',
+      status: map['status'] ?? 'Paid',
+      dateTime: DateTime.parse(map['dateTime']),
+    );
+  }
+}
+
+class ClientContact {
+  final String id;
+  final String name;
+  final String phoneNumber;
+
+  ClientContact({
+    required this.id,
+    required this.name,
+    required this.phoneNumber,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'phoneNumber': phoneNumber,
+    };
+  }
+
+  factory ClientContact.fromMap(Map<String, dynamic> map) {
+    return ClientContact(
+      id: map['id'] ?? '',
+      name: map['name'] ?? '',
+      phoneNumber: map['phoneNumber'] ?? '',
+    );
+  }
+}
+
+class WalletStateData {
+  final double cash;
+  final double bank;
+  final double easyPaisa;
+  final double jazzCash;
+
+  WalletStateData({
+    this.cash = 0.0,
+    this.bank = 0.0,
+    this.easyPaisa = 0.0,
+    this.jazzCash = 0.0,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'cash': cash,
+      'bank': bank,
+      'easyPaisa': easyPaisa,
+      'jazzCash': jazzCash,
+    };
+  }
+
+  factory WalletStateData.fromMap(Map<String, dynamic> map) {
+    return WalletStateData(
+      cash: (map['cash'] as num?)?.toDouble() ?? 0.0,
+      bank: (map['bank'] as num?)?.toDouble() ?? 0.0,
+      easyPaisa: (map['easyPaisa'] as num?)?.toDouble() ?? 0.0,
+      jazzCash: (map['jazzCash'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+// ==========================================
+// 2. STATE MANAGEMENT (HYDRATED BLOC FOR DATA RETENTION)
+// ==========================================
+
+class KhataState {
+  final List<DeliveryOrder> orders;
+  final List<ClientContact> clients;
+  final WalletStateData wallet;
+
+  KhataState({
+    required this.orders,
+    required this.clients,
+    required this.wallet,
+  });
+
+  factory KhataState.initial() {
+    return KhataState(
+      orders: [],
+      clients: [],
+      wallet: WalletStateData(cash: 3500.0, bank: 1850.0, easyPaisa: 0.0, jazzCash: 1177.0),
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'orders': orders.map((e) => e.toMap()).toList(),
+      'clients': clients.map((e) => e.toMap()).toList(),
+      'wallet': wallet.toMap(),
+    };
+  }
+
+  factory KhataState.fromMap(Map<String, dynamic> map) {
+    return KhataState(
+      orders: (map['orders'] as List? ?? []).map((e) => DeliveryOrder.fromMap(e)).toList(),
+      clients: (map['clients'] as List? ?? []).map((e) => ClientContact.fromMap(e)).toList(),
+      wallet: map['wallet'] != null ? WalletStateData.fromMap(map['wallet']) : WalletStateData(),
+    );
+  }
+}
+
+class KhataBloc extends HydratedCubit<KhataState> {
+  KhataBloc() : super(KhataState.initial());
+
+  void addOrder(DeliveryOrder order) {
+    final updatedOrders = List<DeliveryOrder>.from(state.orders)..insert(0, order);
+    
+    double c = state.wallet.cash;
+    double b = state.wallet.bank;
+    double ep = state.wallet.easyPaisa;
+    double jc = state.wallet.jazzCash;
+
+    if (order.status == 'Paid') {
+      switch (order.paymentMode) {
+        case 'Cash': c += order.billAmount; break;
+        case 'Bank': b += order.billAmount; break;
+        case 'EasyPaisa': ep += order.billAmount; break;
+        case 'JazzCash': jc += order.billAmount; break;
+      }
+    }
+
+    emit(KhataState(
+      orders: updatedOrders,
+      clients: state.clients,
+      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+    ));
+  }
+
+  void addClient(ClientContact client) {
+    final updatedClients = List<ClientContact>.from(state.clients)..add(client);
+    emit(KhataState(
+      orders: state.orders,
+      clients: updatedClients,
+      wallet: state.wallet,
+    ));
+  }
+
+  void updateOrderStatus(String id, String newStatus) {
+    final updatedOrders = state.orders.map((order) {
+      if (order.id == id) {
+        return DeliveryOrder(
+          id: order.id,
+          customerName: order.customerName,
+          phoneNumber: order.phoneNumber,
+          billAmount: order.billAmount,
+          paymentMode: order.paymentMode,
+          status: newStatus,
+          dateTime: order.dateTime,
+        );
+      }
+      return order;
+    }).toList();
+    emit(KhataState(orders: updatedOrders, clients: state.clients, wallet: state.wallet));
+  }
+
+  void transferFunds(String from, String to, double amount) {
+    double c = state.wallet.cash;
+    double b = state.wallet.bank;
+    double ep = state.wallet.easyPaisa;
+    double jc = state.wallet.jazzCash;
+
+    switch (from) {
+      case 'Cash': c -= amount; break;
+      case 'Bank': b -= amount; break;
+      case 'EasyPaisa': ep -= amount; break;
+      case 'JazzCash': jc -= amount; break;
+    }
+    switch (to) {
+      case 'Cash': c += amount; break;
+      case 'Bank': b += amount; break;
+      case 'EasyPaisa': ep += amount; break;
+      case 'JazzCash': jc += amount; break;
+    }
+
+    emit(KhataState(
+      orders: state.orders,
+      clients: state.clients,
+      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+    ));
+  }
+
+  @override
+  KhataState? fromJson(Map<String, dynamic> json) => KhataState.fromMap(json);
+
+  @override
+  Map<String, dynamic>? toJson(KhataState state) => state.toMap();
+}
+
+// ==========================================
+// 3. MAIN APPLICATION SETUP
+// ==========================================
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
-  
-  // Register raw boxes directly into persistent phone memory
-  await Hive.openBox('deliveries');
-  await Hive.openBox('customers');
-  await Hive.openBox('transactions');
-  await Hive.openBox('wallet_balances');
-
+  HydratedBloc.storage = await HydratedStorage.build(
+    storageDirectory: await getApplicationDocumentsDirectory(),
+  );
   runApp(const DeliveryKhataApp());
 }
 
@@ -21,14 +258,31 @@ class DeliveryKhataApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Durshal Delivery Khata',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.teal,
-        scaffoldBackgroundColor: const Color(0xFFF5F7FA),
+    return BlocProvider(
+      create: (context) => KhataBloc(),
+      child: MaterialApp(
+        title: 'Durshal Delivery Khata',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          primaryColor: const Color(0xFF1A252C), 
+          scaffoldBackgroundColor: const Color(0xFFF5F7F8),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFF1A252C), 
+            foregroundColor: Colors.white,
+            elevation: 4,
+            titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+            backgroundColor: Colors.white,
+            selectedItemColor: Color(0xFF1A252C),
+            unselectedItemColor: Colors.grey,
+            selectedLabelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            type: BottomNavigationBarType.fixed,
+            elevation: 10,
+          ),
+        ),
+        home: const MainHomeScreen(),
       ),
-      home: const MainHomeScreen(),
     );
   }
 }
@@ -42,78 +296,25 @@ class MainHomeScreen extends StatefulWidget {
 
 class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
-  final Box deliveryBox = Hive.box('deliveries');
-  final Box customerBox = Hive.box('customers');
-  final Box transBox = Hive.box('transactions');
-  final Box walletBox = Hive.box('wallet_balances');
 
-  @override
-  void initState() {
-    super.initState();
-    // Establish structural fallback profiles for regional funding channels
-    if (walletBox.isEmpty) {
-      walletBox.put('Cash', 0.0);
-      walletBox.put('Bank', 0.0);
-      walletBox.put('EasyPaisa', 0.0);
-      walletBox.put('JazzCash', 0.0);
-    }
-  }
-
-  // Opens native Android phone book screen overlay to extract data 
-  Future<Contact?> _pickPhoneContact() async {
-    if (await Permission.contacts.request().isGranted) {
-      final contacts = await FlutterContacts.getContacts(withProperties: true);
-      if (contacts.isNotEmpty) {
-        return await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => Scaffold(
-              appBar: AppBar(title: const Text("Select Contact"), backgroundColor: Colors.teal),
-              body: ListView.builder(
-                itemCount: contacts.length,
-                itemBuilder: (context, i) {
-                  final c = contacts[i];
-                  final phone = c.phones.isNotEmpty ? c.phones.first.number : 'No Number';
-                  return ListTile(
-                    title: Text(c.displayName),
-                    subtitle: Text(phone),
-                    onTap: () => Navigator.pop(context, c),
-                  );
-                },
-              ),
-            ),
-          ),
-        );
-      }
-    }
-    return null;
-  }
+  final List<Widget> _screens = [
+    const DeliveriesScreen(),
+    const ClientsScreen(),
+    const WalletScreen(),
+    const HistoryScreen(),
+    const SummaryScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    // Structural index for all 5 essential operational tabs
-    final List<Widget> tabs = [
-      _buildDeliveriesTab(),
-      _buildCustomersTab(),
-      _buildWalletTab(),
-      _buildHistoryTab(),
-      _buildSummaryTab(),
-    ];
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Durshal Delivery Khata', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        backgroundColor: Colors.teal,
-      ),
-      body: tabs[_currentIndex],
+      body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: Colors.teal,
-        unselectedItemColor: Colors.grey,
         onTap: (index) => setState(() => _currentIndex = index),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'Deliveries'),
-          BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Customers'),
+          BottomNavigationBarItem(icon: Icon(Icons.delivery_dining), label: 'Deliveries'),
+          BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Clients'),
           BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Wallet'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
           BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'Summary'),
@@ -121,465 +322,548 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       ),
     );
   }
+}
 
-  // --- 1. DELIVERIES TAB ---
-  Widget _buildDeliveriesTab() {
-    return ValueListenableBuilder(
-      valueListenable: deliveryBox.listenable(),
-      builder: (context, Box box, _) {
-        final list = box.values.toList();
-        return Scaffold(
-          body: list.isEmpty
-              ? const Center(child: Text("No deliveries added yet."))
-              : ListView.builder(
-                  itemCount: list.length,
-                  itemBuilder: (context, i) {
-                    final d = list[i] as Map;
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: ListTile(
-                        title: Text("${d['customerName']} (${d['customerPhone']})"),
-                        subtitle: Text("Rs. ${d['amount']} — ${d['status']}"),
-                        trailing: d['status'] == 'Pending'
-                            ? IconButton(
-                                icon: const Icon(Icons.check_circle, color: Colors.green),
-                                onPressed: () {
-                                  final updatedData = Map<String, dynamic>.from(d);
-                                  updatedData['status'] = 'Delivered';
-                                  box.putAt(i, updatedData);
+// ==========================================
+// 4. TAB SCREENS IMPLEMENTATIONS
+// ==========================================
 
-                                  // Automatically assign incoming cash to local physical register 
-                                  double cash = walletBox.get('Cash') ?? 0.0;
-                                  walletBox.put('Cash', cash + d['amount']);
+class DeliveriesScreen extends StatelessWidget {
+  const DeliveriesScreen({super.key});
 
-                                  // Append clear record details into history vault logs
-                                  transBox.add({
-                                    'type': 'delivery_payout',
-                                    'sourceAccount': 'Cash',
-                                    'amount': d['amount'],
-                                    'date': DateTime.now().toString(),
-                                    'description': "Order for ${d['customerName']} Delivered",
-                                  });
-                                  setState(() {});
-                                },
-                              )
-                            : const Icon(Icons.done_all, color: Colors.teal),
-                      ),
-                    );
-                  },
-                ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: () => _showAddDeliveryDialog(),
-            backgroundColor: Colors.teal,
-            child: const Icon(Icons.add, color: Colors.white),
-          ),
-        );
-      },
+  void _openNewOrderBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const NewOrderBottomSheet(),
     );
   }
 
-  void _showAddDeliveryDialog() {
-    String selectedName = '';
-    String selectedPhone = '';
-    final amountCtrl = TextEditingController();
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Durshal Delivery')),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          final runningOrders = state.orders.where((o) => o.status == 'Pending').toList();
+          final historicalOrders = state.orders.where((o) => o.status == 'Paid').toList();
+          final displayOrders = [...runningOrders, ...historicalOrders];
 
+          if (displayOrders.isEmpty) {
+            return const Center(child: Text('No active records found. Tap + to add.', style: TextStyle(fontSize: 16)));
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: displayOrders.length,
+            itemBuilder: (context, index) {
+              final order = displayOrders[index];
+              final isPaid = order.status == 'Paid';
+              return Card(
+                elevation: 2,
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  title: Text(order.customerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 4),
+                      Text('Total: Rs. ${order.billAmount} | Mode: ${order.paymentMode}'),
+                      Text(DateFormat('dd MMM yyyy, hh:mm a').format(order.dateTime), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    ],
+                  ),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isPaid ? const Color(0xFFFFE0B2) : Colors.red.shade100,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      isPaid ? 'Paid' : 'Udhar',
+                      style: TextStyle(color: isPaid ? Colors.orange.shade900 : Colors.red.shade900, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  onTap: () {
+                    if (!isPaid) {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Change Status'),
+                          content: Text('Mark order for ${order.customerName} as paid?'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('No')),
+                            ElevatedButton(
+                              onPressed: () {
+                                context.read<KhataBloc>().updateOrderStatus(order.id, 'Paid');
+                                Navigator.pop(ctx);
+                              },
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A252C)),
+                              child: const Text('Mark Paid'),
+                            )
+                          ],
+                        ),
+                      );
+                    }
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _openNewOrderBottomSheet(context),
+        backgroundColor: const Color(0xFF1A252C),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+    );
+  }
+}
+
+class ClientsScreen extends StatelessWidget {
+  const ClientsScreen({super.key});
+
+  void _showAddCustomerModal(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(builder: (context, setDialogState) {
-          return AlertDialog(
-            title: const Text("New Delivery Order"),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-                    onPressed: () async {
-                      final c = await _pickPhoneContact();
-                      if (c != null) {
-                        setDialogState(() {
-                          selectedName = c.displayName;
-                          selectedPhone = c.phones.isNotEmpty ? c.phones.first.number : '';
-                        });
-                      }
-                    },
-                    icon: const Icon(Icons.contact_phone, color: Colors.white),
-                    label: const Text("Select from Phonebook", style: TextStyle(color: Colors.white)),
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    hint: const Text("Or choose saved customer"),
-                    items: customerBox.values.map((c) {
-                      final map = c as Map;
-                      return DropdownMenuItem(value: "${map['name']}||${map['phone']}", child: Text(map['name']));
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        final split = val.split("||");
-                        setDialogState(() {
-                          selectedName = split[0];
-                          selectedPhone = split[1];
-                        });
-                      }
-                    },
-                  ),
-                  if (selectedName.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text("Target: $selectedName ($selectedPhone)", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
-                  ],
-                  TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: "Bill Amount (Rs.)"), keyboardType: TextInputType.number),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-                onPressed: () {
-                  if (selectedName.isNotEmpty && amountCtrl.text.isNotEmpty) {
-                    deliveryBox.add({
-                      'id': DateTime.now().millisecondsSinceEpoch.toString(),
-                      'customerName': selectedName,
-                      'customerPhone': selectedPhone,
-                      'amount': double.parse(amountCtrl.text),
-                      'status': 'Pending',
-                      'date': DateTime.now().toString(),
-                    });
-                    Navigator.pop(context);
-                  }
-                },
-                child: const Text("Create Order", style: TextStyle(color: Colors.white)),
-              )
+      builder: (context) => const AddCustomerFormDialog(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Clients')),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          if (state.clients.isEmpty) {
+            return const Center(child: Text('No active external loans recorded.', style: TextStyle(fontSize: 15)));
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: state.clients.length,
+            itemBuilder: (context, index) {
+              final client = state.clients[index];
+              return Card(
+                elevation: 1.5,
+                child: ListTile(
+                  leading: const CircleAvatar(backgroundColor: Color(0xFF1A252C), child: Icon(Icons.person, color: Colors.white)),
+                  title: Text(client.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(client.phoneNumber),
+                  trailing: const Icon(Icons.chevron_right),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddCustomerModal(context),
+        backgroundColor: const Color(0xFF1A252C),
+        child: const Icon(Icons.person_add, color: Colors.white),
+      ),
+    );
+  }
+}
+
+class WalletScreen extends StatelessWidget {
+  const WalletScreen({super.key});
+
+  void _openTransferFundsDialog(BuildContext context) {
+    showDialog(context: context, builder: (context) => const TransferFundsDialog());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Wallet Ledger'),
+        actions: [
+          IconButton(icon: const Icon(Icons.swap_horiz), onPressed: () => _openTransferFundsDialog(context)),
+        ],
+      ),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          final w = state.wallet;
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _buildWalletBalanceRow('Cash', w.cash, Colors.green),
+              _buildWalletBalanceRow('Bank Account', w.bank, Colors.blue),
+              _buildWalletBalanceRow('EasyPaisa', w.easyPaisa, Colors.lightGreen),
+              _buildWalletBalanceRow('JazzCash', w.jazzCash, Colors.redAccent),
             ],
           );
+        },
+      ),
+    );
+  }
+
+  Widget _buildWalletBalanceRow(String label, double amount, Color accent) {
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Container(width: 5, height: 25, color: accent),
+                const SizedBox(width: 12),
+                Text(label, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            Text('Rs. ${amount.toStringAsFixed(1)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('History Logs')),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          final reversedOrders = List<DeliveryOrder>.from(state.orders);
+          if (reversedOrders.isEmpty) {
+            return const Center(child: Text('History Records Screen is currently clean.'));
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: reversedOrders.length,
+            itemBuilder: (context, index) {
+              final item = reversedOrders[index];
+              return ListTile(
+                leading: Icon(item.status == 'Paid' ? Icons.check_circle : Icons.error, color: item.status == 'Paid' ? Colors.green : Colors.red),
+                title: Text(item.customerName),
+                subtitle: Text('Amount: Rs. ${item.billAmount} via ${item.paymentMode}'),
+                trailing: Text(DateFormat('dd/MM').format(item.dateTime)),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class SummaryScreen extends StatelessWidget {
+  const SummaryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Summary and Charts Overview')),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          double totalVal = 0.0;
+          double pendingVal = 0.0;
+          int deliveredCount = 0;
+
+          for (var order in state.orders) {
+            if (order.status == 'Paid') {
+              totalVal += order.billAmount;
+              deliveredCount++;
+            } else {
+              pendingVal += order.billAmount;
+            }
+          }
+
+          return Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Business Logistics Metrics', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                const SizedBox(height: 20),
+                _buildMetricCard('Total Earned Valuations', 'Rs. ${totalVal.toStringAsFixed(1)}', Colors.green, Icons.monetization_on),
+                _buildMetricCard('Pending Credit (Market Stuck)', 'Rs. ${pendingVal.toStringAsFixed(1)}', Colors.amber.shade800, Icons.hourglass_empty),
+                _buildMetricCard('Delivered Consignments', '$deliveredCount Orders', Colors.blue, Icons.local_shipping),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(String title, String value, Color col, IconData icon) {
+    return Card(
+      elevation: 3,
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      child: ListTile(
+        leading: CircleAvatar(backgroundColor: col.withOpacity(0.1), child: Icon(icon, color: col)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+        trailing: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: col)),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 5. COMPLEX WIDGET SHEETS & INTERACTION DIALOGS
+// ==========================================
+
+class NewOrderBottomSheet extends StatefulWidget {
+  const NewOrderBottomSheet({super.key});
+
+  @override
+  State<NewOrderBottomSheet> createState() => _NewOrderBottomSheetState();
+}
+
+class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _amountController = TextEditingController();
+  String _selectedPaymentMode = 'Cash';
+  String _selectedStatus = 'Paid';
+
+  Future<void> _selectFromPhoneBook() async {
+    if (await FlutterContacts.requestPermission()) {
+      final contact = await FlutterContacts.openExternalPick();
+      if (contact != null && contact.phones.isNotEmpty) {
+        setState(() {
+          _nameController.text = contact.displayName;
+          String phone = contact.phones.first.number.replaceAll(RegExp(r'\s+|-|\(|\)'), '');
+          _phoneController.text = phone;
         });
-      },
-    );
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contact directory permissions rejected.')),
+      );
+    }
   }
 
-  // --- 2. CUSTOMERS TAB ---
-  Widget _buildCustomersTab() {
-    return ValueListenableBuilder(
-      valueListenable: customerBox.listenable(),
-      builder: (context, Box box, _) {
-        final list = box.values.toList();
-        return Scaffold(
-          body: list.isEmpty
-              ? const Center(child: Text("No Customers added yet."))
-              : ListView.builder(
-                  itemCount: list.length,
-                  itemBuilder: (context, i) {
-                    final c = list[i] as Map;
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: ListTile(
-                        leading: const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.person, color: Colors.white)),
-                        title: Text(c['name']),
-                        subtitle: Text(c['phone']),
-                      ),
-                    );
-                  },
-                ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: () => _showAddCustomerDialog(),
-            backgroundColor: Colors.teal,
-            child: const Icon(Icons.person_add, color: Colors.white),
-          ),
-        );
-      },
-    );
+  void _triggerWhatsAppMessage(String name, String phone, double amount) async {
+    String cleanPhone = phone.replaceAll('+', '');
+    if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
+      cleanPhone = '92${cleanPhone.substring(1)}';
+    }
+    final message = "Hello $name, your order breakdown from Durshal Delivery amounting to Rs. $amount has been registered. Thank you!";
+    final url = "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}";
+    
+    if (await canLaunchUrl(Uri.parse(url))) {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    }
   }
 
-  void _showAddCustomerDialog() {
-    final nameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        top: 24, left: 20, right: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('New Order Record Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              onPressed: _selectFromPhoneBook,
+              icon: const Icon(Icons.contact_phone),
+              label: const Text('Select From Phone Book'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal.shade700,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Customer Name', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'WhatsApp Number (e.g. 923xxxxxxxxx)', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
+            const SizedBox(height: 12),
+            TextField(controller: _amountController, decoration: const InputDecoration(labelText: 'Bill Amount (Rs.)', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedPaymentMode,
+              decoration: const InputDecoration(labelText: 'Payment Gateway', border: OutlineInputBorder()),
+              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash', 'Udhar'].map((mode) => DropdownMenuItem(value: mode, child: Text(mode))).toList(),
+              onChanged: (val) => setState(() {
+                _selectedPaymentMode = val!;
+                if (_selectedPaymentMode == 'Udhar') {
+                  _selectedStatus = 'Pending';
+                } else {
+                  _selectedStatus = 'Paid';
+                }
+              }),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                if (_nameController.text.isEmpty || _amountController.text.isEmpty) return;
+                
+                final amt = double.tryParse(_amountController.text) ?? 0.0;
+                final order = DeliveryOrder(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  customerName: _nameController.text,
+                  phoneNumber: _phoneController.text,
+                  billAmount: amt,
+                  paymentMode: _selectedPaymentMode,
+                  status: _selectedStatus,
+                  dateTime: DateTime.now(),
+                );
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Add New Customer"),
-        content: Column(
+                context.read<KhataBloc>().addOrder(order);
+                Navigator.pop(context);
+
+                if (_phoneController.text.isNotEmpty) {
+                  _triggerWhatsAppMessage(order.customerName, order.phoneNumber, order.billAmount);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1A252C),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Save + Send WhatsApp Status', style: TextStyle(color: Colors.white, fontSize: 16)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AddCustomerFormDialog extends StatefulWidget {
+  const AddCustomerFormDialog({super.key});
+
+  @override
+  State<AddCustomerFormDialog> createState() => _AddCustomerFormDialogState();
+}
+
+class _AddCustomerFormDialogState extends State<AddCustomerFormDialog> {
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+
+  Future<void> _importContactDirectly() async {
+    if (await FlutterContacts.requestPermission()) {
+      final contact = await FlutterContacts.openExternalPick();
+      if (contact != null) {
+        setState(() {
+          _nameController.text = contact.displayName;
+          if (contact.phones.isNotEmpty) {
+            _phoneController.text = contact.phones.first.number;
+          }
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add New Customer Account'),
+      content: SingleChildScrollView(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () async {
-                final c = await _pickPhoneContact();
-                if (c != null) {
-                  nameCtrl.text = c.displayName;
-                  phoneCtrl.text = c.phones.isNotEmpty ? c.phones.first.number : '';
-                }
-              },
-              icon: const Icon(Icons.import_contacts, color: Colors.white),
-              label: const Text("Import From Phone Book", style: TextStyle(color: Colors.white)),
+              onPressed: _importContactDirectly,
+              icon: const Icon(Icons.import_contacts),
+              label: const Text('Import From Phone Book'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
             ),
-            const Divider(height: 20),
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Manual Form Name")),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: "Manual Phone Link"), keyboardType: TextInputType.phone),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-            onPressed: () {
-              if (nameCtrl.text.isNotEmpty && phoneCtrl.text.isNotEmpty) {
-                customerBox.add({
-                  'name': nameCtrl.text,
-                  'phone': phoneCtrl.text,
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Save", style: TextStyle(color: Colors.white)),
-          )
-        ],
-      ),
-    );
-  }
-
-  // --- 3. WALLET TAB ---
-  Widget _buildWalletTab() {
-    final accounts = ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'];
-    return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Expanded(
-              child: GridView.builder(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 1.3),
-                itemCount: accounts.length,
-                itemBuilder: (context, i) {
-                  final acc = accounts[i];
-                  final bal = walletBox.get(acc) ?? 0.0;
-                  return Card(
-                    color: Colors.teal.shade50,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(acc, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal)),
-                          const SizedBox(height: 8),
-                          Text("Rs. $bal", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(vertical: 12)),
-                    onPressed: () => _showAddMoneyDialog(),
-                    icon: const Icon(Icons.account_balance, color: Colors.white),
-                    label: const Text("Inject Cash / Top-Up", style: TextStyle(color: Colors.white)),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(vertical: 12)),
-                    onPressed: () => _showTransferMoneyDialog(),
-                    icon: const Icon(Icons.compare_arrows, color: Colors.white),
-                    label: const Text("Transfer Funds", style: TextStyle(color: Colors.white)),
-                  ),
-                ),
-              ],
-            )
+            const SizedBox(height: 16),
+            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Manual Form Name', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'Manual Phone Link', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
           ],
         ),
       ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            if (_nameController.text.isEmpty) return;
+            final client = ClientContact(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              name: _nameController.text,
+              phoneNumber: _phoneController.text,
+            );
+            context.read<KhataBloc>().addClient(client);
+            Navigator.pop(context);
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A252C)),
+          child: const Text('Save Account', style: TextStyle(color: Colors.white)),
+        )
+      ],
     );
   }
+}
 
-  void _showAddMoneyDialog() {
-    String selectedAcc = 'Cash';
-    final amountCtrl = TextEditingController();
-    final descCtrl = TextEditingController();
+class TransferFundsDialog extends StatefulWidget {
+  const TransferFundsDialog({super.key});
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Inject Capital (Top-Up)"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              value: selectedAcc,
-              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-              onChanged: (val) => selectedAcc = val!,
-              decoration: const InputDecoration(labelText: "Target Account Profile"),
-            ),
-            TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: "Amount (Rs.)"), keyboardType: TextInputType.number),
-            TextField(controller: descCtrl, decoration: const InputDecoration(labelText: "Source Note (e.g., Owner personal cash)")),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            onPressed: () {
-              if (amountCtrl.text.isNotEmpty) {
-                double amount = double.parse(amountCtrl.text);
-                double currentBal = walletBox.get(selectedAcc) ?? 0.0;
-                walletBox.put(selectedAcc, currentBal + amount);
+  @override
+  State<TransferFundsDialog> createState() => _TransferFundsDialogState();
+}
 
-                transBox.add({
-                  'type': 'income',
-                  'sourceAccount': selectedAcc,
-                  'amount': amount,
-                  'date': DateTime.now().toString(),
-                  'description': descCtrl.text.isEmpty ? "Direct Balance Addition" : descCtrl.text,
-                });
-                Navigator.pop(context);
-                setState(() {});
-              }
-            },
-            child: const Text("Add Balance", style: TextStyle(color: Colors.white)),
-          )
-        ],
-      ),
-    );
-  }
+class _TransferFundsDialogState extends State<TransferFundsDialog> {
+  String _fromWallet = 'Cash';
+  String _toWallet = 'Bank';
+  final _amountController = TextEditingController();
 
-  void _showTransferMoneyDialog() {
-    String fromAcc = 'Cash';
-    String toAcc = 'Bank';
-    final amountCtrl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Transfer Balance internally"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String>(
-              value: fromAcc,
-              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((e) => DropdownMenuItem(value: e, child: Text("From: $e"))).toList(),
-              onChanged: (val) => fromAcc = val!,
-            ),
-            DropdownButtonFormField<String>(
-              value: toAcc,
-              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((e) => DropdownMenuItem(value: e, child: Text("To: $e"))).toList(),
-              onChanged: (val) => toAcc = val!,
-            ),
-            TextField(controller: amountCtrl, decoration: const InputDecoration(labelText: "Transfer Amount (Rs.)"), keyboardType: TextInputType.number),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            onPressed: () {
-              double amount = double.parse(amountCtrl.text);
-              double fromBal = walletBox.get(fromAcc) ?? 0.0;
-              if (fromBal >= amount) {
-                walletBox.put(fromAcc, fromBal - amount);
-                double toBal = walletBox.get(toAcc) ?? 0.0;
-                walletBox.put(toAcc, toBal + amount);
-
-                transBox.add({
-                  'type': 'transfer',
-                  'sourceAccount': fromAcc,
-                  'destinationAccount': toAcc,
-                  'amount': amount,
-                  'date': DateTime.now().toString(),
-                  'description': "Transferred from $fromAcc to $toAcc",
-                });
-                Navigator.pop(context);
-                setState(() {});
-              }
-            },
-            child: const Text("Execute Transfer", style: TextStyle(color: Colors.white)),
-          )
-        ],
-      ),
-    );
-  }
-
-  // --- 4. HISTORY TAB ---
-  Widget _buildHistoryTab() {
-    return ValueListenableBuilder(
-      valueListenable: transBox.listenable(),
-      builder: (context, Box box, _) {
-        final list = box.values.toList().reversed.toList();
-        return list.isEmpty
-            ? const Center(child: Text("No transaction logs registered yet."))
-            : ListView.builder(
-                itemCount: list.length,
-                itemBuilder: (context, i) {
-                  final t = list[i] as Map;
-                  IconData icon = Icons.arrow_downward;
-                  Color iconColor = Colors.green;
-                  if (t['type'] == 'transfer') {
-                    icon = Icons.compare_arrows;
-                    iconColor = Colors.blue;
-                  }
-
-                  return Card(
-                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    child: ListTile(
-                      leading: CircleAvatar(backgroundColor: iconColor.withOpacity(0.1), child: Icon(icon, color: iconColor)),
-                      title: Text(t['description']),
-                      subtitle: Text("Channel Context: ${t['sourceAccount']}"),
-                      trailing: Text("Rs. ${t['amount']}", style: TextStyle(fontWeight: FontWeight.bold, color: iconColor)),
-                    ),
-                  );
-                },
-              );
-      },
-    );
-  }
-
-  // --- 5. SUMMARY TAB ---
-  Widget _buildSummaryTab() {
-    double totalEarned = 0;
-    double totalPending = 0;
-    int completedCount = 0;
-
-    for (var d in deliveryBox.values) {
-      final map = d as Map;
-      if (map['status'] == 'Delivered') {
-        totalEarned += map['amount'];
-        completedCount++;
-      } else if (map['status'] == 'Pending') {
-        totalPending += map['amount'];
-      }
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Transfer Balances'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Text("Business Logistics Metrics", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal)),
-          const SizedBox(height: 20),
-          _buildSummaryCard("Total Earned Valuations", "Rs. $totalEarned", Colors.green, Icons.monetization_on),
-          const SizedBox(height: 12),
-          _buildSummaryCard("Pending Credit (Market Stuck)", "Rs. $totalPending", Colors.orange, Icons.hourglass_empty),
-          const SizedBox(height: 12),
-          _buildSummaryCard("Delivered Consignments", "$completedCount Orders", Colors.blue, Icons.assignment_turned_in),
+          DropdownButtonFormField<String>(
+            value: _fromWallet,
+            decoration: const InputDecoration(labelText: 'Source Wallet'),
+            items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+            onChanged: (val) => setState(() => _fromWallet = val!),
+          ),
+          DropdownButtonFormField<String>(
+            value: _toWallet,
+            decoration: const InputDecoration(labelText: 'Destination Account'),
+            items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+            onChanged: (val) => setState(() => _toWallet = val!),
+          ),
+          TextField(controller: _amountController, decoration: const InputDecoration(labelText: 'Amount (Rs.)'), keyboardType: TextInputType.number),
         ],
       ),
-    );
-  }
-
-  Widget _buildSummaryCard(String title, String value, Color color, IconData icon) {
-    return Card(
-      elevation: 2,
-      child: ListTile(
-        leading: CircleAvatar(backgroundColor: color.withOpacity(0.1), child: Icon(icon, color: color)),
-        title: Text(title, style: const TextStyle(fontSize: 14, color: Colors.grey)),
-        trailing: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
-      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            final amt = double.tryParse(_amountController.text) ?? 0.0;
+            if (amt > 0 && _fromWallet != _toWallet) {
+              context.read<KhataBloc>().transferFunds(_fromWallet, _toWallet, amt);
+            }
+            Navigator.pop(context);
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A252C)),
+          child: const Text('Transfer'),
+        )
+      ],
     );
   }
 }
