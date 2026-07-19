@@ -1,7 +1,8 @@
-name: delivery_khata
-description: Durshal Delivery - Orders, Wallet, Udhar & Expense Tracker
+name: durshal_delivery
+description: "A Flutter application for managing Durshal Delivery orders, wallets, and customer ledgers."
 publish_to: 'none'
-version: 2.0.0+2  # bumped for v2.0
+
+version: 1.0.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -9,13 +10,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
+  cupertino_icons: ^1.0.6
+  # WhatsApp Business open karne aur deep links ke liye
   url_launcher: ^6.2.5
-  pdf: ^3.10.8
-  printing: ^5.12.2
-  flutter_slidable: ^3.1.1  # NEW - for swipe to delete
-  intl: ^0.19.0             # NEW - for date formatting
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
