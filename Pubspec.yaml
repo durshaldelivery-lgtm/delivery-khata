@@ -1,7 +1,6 @@
-name: durshal_delivery
-description: "A Flutter application for managing Durshal Delivery orders, wallets, and customer ledgers."
+name: delivery_khata
+description: "A delivery logistics and localized ledger application."
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -11,8 +10,14 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  # WhatsApp Business open karne aur deep links ke liye
-  url_launcher: ^6.2.5
+  
+  # Localized Data Management Configurations
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Contact Synchronization Pipelines
+  flutter_contacts: ^1.1.9
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
