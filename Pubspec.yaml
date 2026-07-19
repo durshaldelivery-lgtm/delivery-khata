@@ -1,12 +1,21 @@
 name: delivery_khata
-description: Delivery Khata App
-version: 1.0.0
-environment: {sdk: '>=3.0.0 <4.0.0'}
+description: Durshal Delivery - Orders, Wallet, Udhar & Expense Tracker
+publish_to: 'none'
+version: 2.0.0+2  # bumped for v2.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
 dependencies:
-  flutter: {sdk: flutter}
+  flutter:
+    sdk: flutter
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-  url_launcher: ^6.2.1
-  pdf: ^3.10.7
-  printing: ^5.11.1
-flutter: {uses-material-design: true}
+  url_launcher: ^6.2.5
+  pdf: ^3.10.8
+  printing: ^5.12.2
+  flutter_slidable: ^3.1.1  # NEW - for swipe to delete
+  intl: ^0.19.0             # NEW - for date formatting
+
+flutter:
+  uses-material-design: true
