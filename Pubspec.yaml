@@ -1,5 +1,5 @@
 name: delivery_khata
-description: "A delivery logistics and localized ledger application."
+description: "A comprehensive production-grade delivery order and expense tracking application for Durshal Delivery."
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,14 +10,13 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  
-  # Localized Data Management Configurations
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
-
-  # Contact Synchronization Pipelines
+  flutter_bloc: ^8.1.3
+  hydrated_bloc: ^9.1.2
+  path_provider: ^2.1.1
+  shared_preferences: ^2.2.2
   flutter_contacts: ^1.1.9
-  permission_handler: ^11.3.1
+  url_launcher: ^6.2.5
+  intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
