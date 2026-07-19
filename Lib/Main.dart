@@ -4,16 +4,16 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:flutter_slidable/flutter_slidable.dart'; // NEW
-import 'package:intl/intl.dart'; // NEW
+import 'package:flutter_slidable/flutter_slidable.dart'; 
+import 'package:intl/intl.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
   await Hive.openBox('orders');
   await Hive.openBox('expenses');
-  await Hive.openBox('transactions'); // NEW
-  await Hive.openBox('wallet'); // NEW
+  await Hive.openBox('transactions'); 
+  await Hive.openBox('wallet'); 
   await Hive.openBox('settings');
   runApp(DurshalDelivery());
 }
@@ -24,7 +24,7 @@ class DurshalDelivery extends StatelessWidget {
     return MaterialApp(
       title: 'Durshal Delivery',
       theme: ThemeData(
-        primaryColor: Color(0xFF1E3A8A), // Durshal Blue
+        primaryColor: Color(0xFF1E3A8A), 
         colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF1E3A8A)),
         useMaterial3: true
       ),
@@ -74,20 +74,12 @@ class _PinLockScreenState extends State<PinLockScreen> {
   }
 }
 
-// NEW 5 TAB LAYOUT
 class HomeScreen extends StatefulWidget {
   @override _HomeScreenState createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
-  final _tabs = [
-    DeliveriesTab(),
-    ClientsTab(),
-    WalletTab(),
-    TransactionsTab(),
-    SummaryTab(),
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +88,17 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Text("Durshal Delivery"),
         backgroundColor: Color(0xFF1E3A8A),
       ),
-      body: _tabs[_currentIndex],
+      // Fixed: Using IndexedStack keeps tab states alive and ensures smooth data rendering
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          DeliveriesTab(),
+          ClientsTab(),
+          WalletTab(),
+          TransactionsTab(),
+          SummaryTab(),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         selectedItemColor: Color(0xFF1E3A8A),
@@ -126,12 +128,10 @@ class _DeliveriesTabState extends State<DeliveriesTab> {
   var walletBox = Hive.box('wallet');
 
   void markAsPaid(int index, Map order) {
-    // Add income to wallet
     String method = order['payment'];
     double amount = order['total'];
     walletBox.put(method, (walletBox.get(method, defaultValue: 0.0) + amount));
 
-    // Add transaction
     txBox.add({
       'date': DateTime.now().toString(),
       'type': 'Income',
@@ -156,7 +156,15 @@ class _DeliveriesTabState extends State<DeliveriesTab> {
               var o = orders[i];
               return Slidable(
                 endActionPane: ActionPane(motion: DrawerMotion(), children: [
-                  SlidableAction(onPressed: (_) => box.deleteAt(box.length - 1 - i), backgroundColor: Colors.red, icon: Icons.delete, label: 'Delete')
+                  SlidableAction(
+                    onPressed: (_) {
+                      box.deleteAt(box.length - 1 - i);
+                      setState(() {});
+                    }, 
+                    backgroundColor: Colors.red, 
+                    icon: Icons.delete, 
+                    label: 'Delete'
+                  )
                 ]),
                 child: Card(
                   child: ListTile(
@@ -165,21 +173,29 @@ class _DeliveriesTabState extends State<DeliveriesTab> {
                     trailing: o['payment'] == 'Udhar'
                      ? ElevatedButton(onPressed: () => markAsPaid(box.length - 1 - i, o), child: Text("Paid"))
                       : null,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AddOrderScreen(order: o, index: box.length - 1 - i))),
+                    // Fixed: Added await and setState to instantly refresh when an order is updated
+                    onTap: () async {
+                      await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOrderScreen(order: o, index: box.length - 1 - i)));
+                      setState(() {});
+                    },
                   ),
                 ),
               );
             }),
+      // Fixed: Added await and setState to refresh the list instantly when a new entry is saved
       floatingActionButton: FloatingActionButton(
         backgroundColor: Color(0xFF1E3A8A),
         child: Icon(Icons.add),
-        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AddOrderScreen())),
+        onPressed: () async {
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOrderScreen()));
+          setState(() {});
+        },
       ),
     );
   }
 }
 
-// TAB 2: CLIENTS - Placeholder for now
+// TAB 2: CLIENTS
 class ClientsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -250,7 +266,6 @@ class SummaryTab extends StatelessWidget {
   Widget build(BuildContext context) {
     var orders = Hive.box('orders').values.toList();
     var expenses = Hive.box('expenses').values.toList();
-    double income = orders.fold(0, (sum, e) => sum + (double.tryParse(e['total'].toString())?? 0));
     double deliveryProfit = orders.fold(0, (sum, e) => sum + (double.tryParse(e['delivery'].toString())?? 0));
     double spent = expenses.fold(0, (sum, e) => sum + (double.tryParse(e['amount'].toString())?? 0));
     double net = deliveryProfit - spent;
@@ -280,6 +295,7 @@ class _AddOrderScreenState extends State<AddOrderScreen> {
   String payment = "Cash";
   var box = Hive.box('orders');
   var txBox = Hive.box('transactions');
+  var walletBox = Hive.box('wallet'); // Loaded wallet reference globally here
 
   @override
   void initState() {
@@ -298,10 +314,34 @@ class _AddOrderScreenState extends State<AddOrderScreen> {
     double total = (double.tryParse(bill.text)?? 0) + (double.tryParse(delivery.text)?? 0);
     var data = {'date': DateTime.now().toString(), 'name': name.text, 'phone': phone.text, 'shop': shop.text, 'bill': bill.text, 'delivery': delivery.text, 'total': total, 'payment': payment};
 
-    if(widget.index!= null) box.putAt(widget.index!, data); else box.add(data);
+    if(widget.index!= null) {
+      // Revert previous account values if editing an older record to prevent duplicate arithmetic errors
+      var oldOrder = box.getAt(widget.index!);
+      if (oldOrder != null && oldOrder['payment'] != 'Udhar') {
+        String oldMethod = oldOrder['payment'];
+        double oldTotal = oldOrder['total'] ?? 0.0;
+        walletBox.put(oldMethod, (walletBox.get(oldMethod, defaultValue: 0.0) - oldTotal));
+      }
+      box.putAt(widget.index!, data); 
+    } else {
+      box.add(data);
+    }
 
+    // Fixed: Account mathematical balancing operations are executed immediately upon saving
     if(payment == 'Udhar') {
       txBox.add({'date': DateTime.now().toString(), 'type': 'Due', 'amount': total, 'method': 'Udhar', 'note': 'To ${name.text} - ${shop.text}'});
+    } else {
+      // Updates standard bank/cash storage directly
+      double currentBalance = walletBox.get(payment, defaultValue: 0.0);
+      walletBox.put(payment, currentBalance + total);
+
+      txBox.add({
+        'date': DateTime.now().toString(),
+        'type': 'Income',
+        'amount': total,
+        'method': payment,
+        'note': 'From ${name.text} - ${shop.text}'
+      });
     }
 
     String msg = "Order Receipt%0AName: ${name.text}%0AShop: ${shop.text}%0ABill: ${bill.text}%0ADelivery: ${delivery.text}%0ATotal: $total%0APaid via: $payment%0AThank you - Durshal Delivery";
