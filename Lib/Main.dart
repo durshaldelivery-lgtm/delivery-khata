@@ -1,369 +1,565 @@
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:flutter_slidable/flutter_slidable.dart'; 
-import 'package:intl/intl.dart'; 
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
-  await Hive.openBox('orders');
-  await Hive.openBox('expenses');
-  await Hive.openBox('transactions'); 
-  await Hive.openBox('wallet'); 
-  await Hive.openBox('settings');
-  runApp(DurshalDelivery());
+void main() {
+  runApp(const DurshalDeliveryApp());
 }
 
-class DurshalDelivery extends StatelessWidget {
+class DurshalDeliveryApp extends StatelessWidget {
+  const DurshalDeliveryApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Durshal Delivery',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primaryColor: Color(0xFF1E3A8A), 
-        colorScheme: ColorScheme.fromSeed(seedColor: Color(0xFF1E3A8A)),
-        useMaterial3: true
+        primaryColor: const Color(0xFF3A3F44),
+        scaffoldBackgroundColor: const Color(0xFFF4F4F5),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF3A3F44),
+          primary: const Color(0xFF3A3F44),
+          secondary: const Color(0xFFFF7619), 
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF3A3F44),
+          foregroundColor: Colors.white,
+          elevation: 2,
+        ),
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          selectedItemColor: Color(0xFFFF7619),
+          unselectedItemColor: Color(0xFF71717A),
+          backgroundColor: Colors.white,
+        ),
+        useMaterial3: true,
       ),
-      home: PinLockScreen(),
-      debugShowCheckedModeBanner: false
+      home: const MainHomeScreen(),
     );
   }
 }
 
-class PinLockScreen extends StatefulWidget {
-  @override _PinLockScreenState createState() => _PinLockScreenState();
+// Data Models
+class Order {
+  String id; // Unique ID for swipe tracking
+  String name;
+  double amount;
+  String status; 
+  String paymentMethod; 
+
+  Order({
+    required this.id,
+    required this.name,
+    required this.amount,
+    required this.status,
+    required this.paymentMethod,
+  });
 }
 
-class _PinLockScreenState extends State<PinLockScreen> {
-  final pinController = TextEditingController();
-  var box = Hive.box('settings');
+class Loan {
+  String id; // Unique ID for swipe tracking
+  String clientName;
+  double amount;
+  String sourceAccount;
+  DateTime date;
+
+  Loan({
+    required this.id,
+    required this.clientName,
+    required this.amount,
+    required this.sourceAccount,
+    required this.date,
+  });
+}
+
+class MainHomeScreen extends StatefulWidget {
+  const MainHomeScreen({super.key});
+
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: EdgeInsets.all(30),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text("Durshal Delivery", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A))),
-              SizedBox(height: 20),
-              Text("Enter PIN to Continue"),
-              TextField(controller: pinController, obscureText: true, keyboardType: TextInputType.number, textAlign: TextAlign.center),
-              SizedBox(height: 20),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF1E3A8A)),
-                onPressed: () {
-                  if (box.get('pin') == null) box.put('pin', pinController.text);
-                  if (box.get('pin') == pinController.text)
-                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomeScreen()));
-                  else
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Wrong PIN")));
-                },
-                child: Text("Unlock")
-              )
-            ]
-          )
-        )
-      )
-    );
-  }
+  State<MainHomeScreen> createState() => _MainHomeScreenState();
 }
 
-class HomeScreen extends StatefulWidget {
-  @override _HomeScreenState createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
+class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
 
+  // Global Wallet Balances
+  Map<String, double> walletBalances = {
+    'Cash': 3500.0,
+    'Bank': 1850.0,
+    'EasyPaisa': 0.0,
+    'JazzCash': 1177.0,
+  };
+
+  // Simulation Lists
+  List<Order> orders = [
+    Order(id: '1', name: 'hshs', amount: 1177.0, status: 'Paid', paymentMethod: 'JazzCash'),
+    Order(id: '2', name: 'ikram', amount: 5320.0, status: 'Udhar', paymentMethod: 'Udhar'),
+    Order(id: '3', name: 'aslam', amount: 3500.0, status: 'Paid', paymentMethod: 'Cash'),
+    Order(id: '4', name: 'irfan', amount: 1850.0, status: 'Paid', paymentMethod: 'Bank'),
+  ];
+
+  List<Loan> activeLoans = [];
+
+  // 1. Deliveries: Mark as Paid Popup
+  void _showPaymentMethodDialog(BuildContext context, Order order) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Select Account for ${order.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((method) {
+              return ListTile(
+                title: Text(method),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  setState(() {
+                    order.status = 'Paid';
+                    order.paymentMethod = method;
+                    walletBalances[method] = (walletBalances[method] ?? 0) + order.amount;
+                  });
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Rs ${order.amount} credited to $method!')),
+                  );
+                },
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  // 2. Wallet: Internal Fund Transfer Popup
+  void _showTransferDialog(BuildContext context) {
+    String fromAccount = 'Cash';
+    String toAccount = 'Bank';
+    final amountController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Internal Fund Transfer'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: fromAccount,
+                    decoration: const InputDecoration(labelText: 'From Account'),
+                    items: walletBalances.keys.map((String key) {
+                      return DropdownMenuItem<String>(value: key, child: Text('$key (Rs ${walletBalances[key]})'));
+                    }).toList(),
+                    onChanged: (val) => setDialogState(() => fromAccount = val!),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: toAccount,
+                    decoration: const InputDecoration(labelText: 'To Account'),
+                    items: walletBalances.keys.map((String key) {
+                      return DropdownMenuItem<String>(value: key, child: Text(key));
+                    }).toList(),
+                    onChanged: (val) => setDialogState(() => toAccount = val!),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Transfer Amount (Rs)'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondary,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    double transferAmount = double.tryParse(amountController.text) ?? 0.0;
+                    if (transferAmount <= 0) return;
+
+                    if ((walletBalances[fromAccount] ?? 0) >= transferAmount) {
+                      setState(() {
+                        walletBalances[fromAccount] = walletBalances[fromAccount]! - transferAmount;
+                        walletBalances[toAccount] = (walletBalances[toAccount] ?? 0) + transferAmount;
+                      });
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Transferred Rs $transferAmount from $fromAccount to $toAccount!')),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Insufficient balance!'), backgroundColor: Colors.red),
+                      );
+                    }
+                  },
+                  child: const Text('Transfer'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // 3. Clients: Lend Money (Give Udhar) Popup
+  void _showLendMoneyDialog(BuildContext context) {
+    final nameController = TextEditingController();
+    final amountController = TextEditingController();
+    String sourceAccount = 'Cash';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Lend Money (Give Udhar)'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Client/Customer Name'),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: sourceAccount,
+                    decoration: const InputDecoration(labelText: 'Source Account (Deduct From)'),
+                    items: walletBalances.keys.map((s) => DropdownMenuItem(value: s, child: Text('$s (Rs ${walletBalances[s]})'))).toList(),
+                    onChanged: (val) => setDialogState(() => sourceAccount = val!),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Udhar Amount (Rs)'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.secondary,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    double amount = double.tryParse(amountController.text) ?? 0.0;
+                    if (nameController.text.isEmpty || amount <= 0) return;
+
+                    if ((walletBalances[sourceAccount] ?? 0) >= amount) {
+                      setState(() {
+                        walletBalances[sourceAccount] = walletBalances[sourceAccount]! - amount;
+                        activeLoans.add(Loan(
+                          id: DateTime.now().toString(),
+                          clientName: nameController.text,
+                          amount: amount,
+                          sourceAccount: sourceAccount,
+                          date: DateTime.now(),
+                        ));
+                      });
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Rs $amount Udhar given to ${nameController.text}')),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Insufficient funds!'), backgroundColor: Colors.red),
+                      );
+                    }
+                  },
+                  child: const Text('Lend'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // WhatsApp Link Automation
+  void _sendWhatsAppBusinessMessage(String phone, String name, double amount) async {
+    String message = "Durshal Delivery\n\nDear $name,\nYour delivery entry is confirmed. Balance Due: Rs $amount.\nThank you!";
+    String url = "whatsapp://send?phone=$phone&text=${Uri.encodeComponent(message)}";
+    final Uri whatsappUri = Uri.parse(url);
+    
+    if (await canLaunchUrl(whatsappUri)) {
+      await launchUrl(whatsappUri);
+    } else {
+      String webUrl = "https://wa.me/$phone?text=${Uri.encodeComponent(message)}";
+      await launchUrl(Uri.parse(webUrl), mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _openNewOrderScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NewOrderScreen(
+          onSave: (name, phone, amount, method) {
+            setState(() {
+              orders.add(Order(
+                id: DateTime.now().toString(),
+                name: name, 
+                amount: amount, 
+                status: method == 'Udhar' ? 'Udhar' : 'Paid', 
+                paymentMethod: method
+              ));
+              if (method != 'Udhar') {
+                walletBalances[method] = (walletBalances[method] ?? 0) + amount;
+              }
+            });
+            if (phone.isNotEmpty && phone != "3xxxxxxxxx") {
+              _sendWhatsAppBusinessMessage(phone, name, amount);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final List<Widget> tabs = [
+      // 1. Deliveries Tab Layout (with Swipe to Delete)
+      ListView.builder(
+        itemCount: orders.length,
+        itemBuilder: (context, index) {
+          final order = orders[index];
+          return Dismissible(
+            key: Key(order.id),
+            direction: DismissDirection.endToStart, // Swipe right to left
+            background: Container(
+              color: Colors.red,
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 20.0),
+              child: const Icon(Icons.delete, color: Colors.white),
+            ),
+            onDismissed: (direction) {
+              setState(() {
+                orders.removeAt(index);
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Order for ${order.name} deleted')),
+              );
+            },
+            child: Card(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: ListTile(
+                title: Text(order.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                subtitle: Text('Total: Rs ${order.amount} | Mode: ${order.paymentMethod}'),
+                trailing: order.status == 'Udhar'
+                    ? ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.secondary, 
+                          foregroundColor: Colors.white
+                        ),
+                        onPressed: () => _showPaymentMethodDialog(context, order),
+                        child: const Text('Paid'),
+                      )
+                    : Chip(
+                        label: Text(order.status), 
+                        backgroundColor: Colors.green.withOpacity(0.2), 
+                        side: BorderSide.none
+                      ),
+              ),
+            ),
+          );
+        },
+      ),
+
+      // 2. Clients Tab Layout (with Swipe to Delete)
+      Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.secondary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(50),
+              ),
+              onPressed: () => _showLendMoneyDialog(context),
+              icon: const Icon(Icons.money_off),
+              label: const Text('Give Udhar (Lend Money to Client)'),
+            ),
+            const SizedBox(height: 15),
+            Expanded(
+              child: activeLoans.isEmpty
+                  ? const Center(child: Text('No active external loans recorded.'))
+                  : ListView.builder(
+                      itemCount: activeLoans.length,
+                      itemBuilder: (context, index) {
+                        final loan = activeLoans[index];
+                        return Dismissible(
+                          key: Key(loan.id),
+                          direction: DismissDirection.endToStart, // Swipe right to left
+                          background: Container(
+                            color: Colors.red,
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20.0),
+                            child: const Icon(Icons.delete, color: Colors.white),
+                          ),
+                          onDismissed: (direction) {
+                            setState(() {
+                              activeLoans.removeAt(index);
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Udhar record for ${loan.clientName} removed')),
+                            );
+                          },
+                          child: Card(
+                            child: ListTile(
+                              title: Text(loan.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              subtitle: Text('Deducted from: ${loan.sourceAccount}'),
+                              trailing: Text(
+                                'Rs ${loan.amount}',
+                                style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+
+      // 3. Wallet Tab Layout with Internal Transfer Option
+      Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary, 
+                foregroundColor: Colors.white, 
+                minimumSize: const Size.fromHeight(50)
+              ),
+              onPressed: () => _showTransferDialog(context),
+              icon: const Icon(Icons.swap_horiz),
+              label: const Text('Transfer Funds Between Accounts'),
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: ListView(
+                children: walletBalances.keys.map((String key) {
+                  return Card(
+                    child: ListTile(
+                      title: Text(key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      trailing: Text(
+                        'Rs ${walletBalances[key]}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF3A3F44)),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      const Center(child: Text('History Records Screen')),
+      const Center(child: Text('Summary and Charts Overview')),
+    ];
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Durshal Delivery"),
-        backgroundColor: Color(0xFF1E3A8A),
-      ),
-      // Fixed: Using IndexedStack keeps tab states alive and ensures smooth data rendering
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          DeliveriesTab(),
-          ClientsTab(),
-          WalletTab(),
-          TransactionsTab(),
-          SummaryTab(),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Durshal Delivery')),
+      body: IndexedStack(index: _currentIndex, children: tabs),
+      floatingActionButton: _currentIndex == 0 
+          ? FloatingActionButton(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Colors.white,
+              onPressed: _openNewOrderScreen,
+              child: const Icon(Icons.add),
+            )
+          : null,
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        selectedItemColor: Color(0xFF1E3A8A),
-        unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
-        onTap: (i) => setState(() => _currentIndex = i),
-        items: [
+        onTap: (index) => setState(() => _currentIndex = index),
+        items: const [
           BottomNavigationBarItem(icon: Icon(Icons.delivery_dining), label: 'Deliveries'),
           BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Clients'),
           BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Wallet'),
-          BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: 'History'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Summary'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
+          BottomNavigationBarItem(icon: Icon(Icons.assessment), label: 'Summary'),
         ],
       ),
     );
   }
 }
 
-// TAB 1: DELIVERIES
-class DeliveriesTab extends StatefulWidget {
-  @override _DeliveriesTabState createState() => _DeliveriesTabState();
-}
-
-class _DeliveriesTabState extends State<DeliveriesTab> {
-  var box = Hive.box('orders');
-  var txBox = Hive.box('transactions');
-  var walletBox = Hive.box('wallet');
-
-  void markAsPaid(int index, Map order) {
-    String method = order['payment'];
-    double amount = order['total'];
-    walletBox.put(method, (walletBox.get(method, defaultValue: 0.0) + amount));
-
-    txBox.add({
-      'date': DateTime.now().toString(),
-      'type': 'Income',
-      'amount': amount,
-      'method': method,
-      'note': 'From ${order['name']} - ${order['shop']}'
-    });
-
-    setState((){});
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Rs $amount added to $method")));
-  }
+class NewOrderScreen extends StatefulWidget {
+  final Function(String, String, double, String) onSave;
+  const NewOrderScreen({super.key, required this.onSave});
 
   @override
-  Widget build(BuildContext context) {
-    var orders = box.values.toList().reversed.toList();
-    return Scaffold(
-      body: orders.isEmpty
-       ? Center(child: Text("No deliveries yet. Tap + to add"))
-        : ListView.builder(
-            itemCount: orders.length,
-            itemBuilder: (_, i) {
-              var o = orders[i];
-              return Slidable(
-                endActionPane: ActionPane(motion: DrawerMotion(), children: [
-                  SlidableAction(
-                    onPressed: (_) {
-                      box.deleteAt(box.length - 1 - i);
-                      setState(() {});
-                    }, 
-                    backgroundColor: Colors.red, 
-                    icon: Icons.delete, 
-                    label: 'Delete'
-                  )
-                ]),
-                child: Card(
-                  child: ListTile(
-                    title: Text(o['name'], style: TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text("${o['shop']}\nTotal: Rs ${o['total']} | ${o['payment']}"),
-                    trailing: o['payment'] == 'Udhar'
-                     ? ElevatedButton(onPressed: () => markAsPaid(box.length - 1 - i, o), child: Text("Paid"))
-                      : null,
-                    // Fixed: Added await and setState to instantly refresh when an order is updated
-                    onTap: () async {
-                      await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOrderScreen(order: o, index: box.length - 1 - i)));
-                      setState(() {});
-                    },
-                  ),
-                ),
-              );
-            }),
-      // Fixed: Added await and setState to refresh the list instantly when a new entry is saved
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Color(0xFF1E3A8A),
-        child: Icon(Icons.add),
-        onPressed: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => AddOrderScreen()));
-          setState(() {});
-        },
-      ),
-    );
-  }
+  State<NewOrderScreen> createState() => _NewOrderScreenState();
 }
 
-// TAB 2: CLIENTS
-class ClientsTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Center(child: Text("Clients Tab - Coming Next"));
-  }
-}
-
-// TAB 3: WALLET
-class WalletTab extends StatefulWidget {
-  @override _WalletTabState createState() => _WalletTabState();
-}
-
-class _WalletTabState extends State<WalletTab> {
-  var walletBox = Hive.box('wallet');
-
-  @override
-  Widget build(BuildContext context) {
-    double cash = walletBox.get('Cash', defaultValue: 0.0);
-    double bank = walletBox.get('Bank', defaultValue: 0.0);
-    double easy = walletBox.get('Easypaisa', defaultValue: 0.0);
-    double jazz = walletBox.get('JazzCash', defaultValue: 0.0);
-    double total = cash + bank + easy + jazz;
-
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Card(color: Color(0xFF1E3A8A), child: ListTile(title: Text("Total Balance", style: TextStyle(color: Colors.white)), trailing: Text("Rs $total", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)))),
-          SizedBox(height: 10),
-          _walletCard("Cash", cash, Icons.money),
-          _walletCard("Bank", bank, Icons.account_balance),
-          _walletCard("Easypaisa", easy, Icons.phone_android),
-          _walletCard("JazzCash", jazz, Icons.phone_android),
-        ],
-      ),
-    );
-  }
-  Widget _walletCard(String title, double amount, IconData icon) {
-    return Card(child: ListTile(leading: Icon(icon, color: Color(0xFF1E3A8A)), title: Text(title, style: TextStyle(fontWeight: FontWeight.bold)), trailing: Text("Rs $amount", style: TextStyle(fontSize: 18))));
-  }
-}
-
-// TAB 4: TRANSACTIONS
-class TransactionsTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    var txBox = Hive.box('transactions');
-    var txs = txBox.values.toList().reversed.toList();
-    return txs.isEmpty
-     ? Center(child: Text("No transactions yet"))
-      : ListView.builder(
-          itemCount: txs.length,
-          itemBuilder: (_, i) {
-            var t = txs[i];
-            return ListTile(
-              leading: Icon(t['type'] == 'Income'? Icons.arrow_downward : Icons.arrow_upward, color: t['type'] == 'Income'? Colors.green : Colors.red),
-              title: Text(t['note']),
-              subtitle: Text(DateFormat('MMM d, y').format(DateTime.parse(t['date']))),
-              trailing: Text("Rs ${t['amount']}", style: TextStyle(fontWeight: FontWeight.bold)),
-            );
-          });
-  }
-}
-
-// TAB 5: SUMMARY
-class SummaryTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    var orders = Hive.box('orders').values.toList();
-    var expenses = Hive.box('expenses').values.toList();
-    double deliveryProfit = orders.fold(0, (sum, e) => sum + (double.tryParse(e['delivery'].toString())?? 0));
-    double spent = expenses.fold(0, (sum, e) => sum + (double.tryParse(e['amount'].toString())?? 0));
-    double net = deliveryProfit - spent;
-
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Text("Delivery Profit: Rs $deliveryProfit", style: TextStyle(fontSize: 18)),
-      Text("Total Expenses: Rs $spent", style: TextStyle(fontSize: 18)),
-      Text("Net: Rs $net", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: net >= 0? Colors.green : Colors.red))
-    ]));
-  }
-}
-
-// NEW ORDER / EDIT ORDER SCREEN
-class AddOrderScreen extends StatefulWidget {
-  final Map? order;
-  final int? index;
-  AddOrderScreen({this.order, this.index});
-  @override _AddOrderScreenState createState() => _AddOrderScreenState();
-}
-
-class _AddOrderScreenState extends State<AddOrderScreen> {
-  final name = TextEditingController();
-  final phone = TextEditingController();
-  final shop = TextEditingController();
-  final bill = TextEditingController();
-  final delivery = TextEditingController();
-  String payment = "Cash";
-  var box = Hive.box('orders');
-  var txBox = Hive.box('transactions');
-  var walletBox = Hive.box('wallet'); // Loaded wallet reference globally here
-
-  @override
-  void initState() {
-    super.initState();
-    if(widget.order!= null){
-      name.text = widget.order!['name'];
-      phone.text = widget.order!['phone'];
-      shop.text = widget.order!['shop'];
-      bill.text = widget.order!['bill'].toString();
-      delivery.text = widget.order!['delivery'].toString();
-      payment = widget.order!['payment'];
-    }
-  }
-
-  void saveOrder() async {
-    double total = (double.tryParse(bill.text)?? 0) + (double.tryParse(delivery.text)?? 0);
-    var data = {'date': DateTime.now().toString(), 'name': name.text, 'phone': phone.text, 'shop': shop.text, 'bill': bill.text, 'delivery': delivery.text, 'total': total, 'payment': payment};
-
-    if(widget.index!= null) {
-      // Revert previous account values if editing an older record to prevent duplicate arithmetic errors
-      var oldOrder = box.getAt(widget.index!);
-      if (oldOrder != null && oldOrder['payment'] != 'Udhar') {
-        String oldMethod = oldOrder['payment'];
-        double oldTotal = oldOrder['total'] ?? 0.0;
-        walletBox.put(oldMethod, (walletBox.get(oldMethod, defaultValue: 0.0) - oldTotal));
-      }
-      box.putAt(widget.index!, data); 
-    } else {
-      box.add(data);
-    }
-
-    // Fixed: Account mathematical balancing operations are executed immediately upon saving
-    if(payment == 'Udhar') {
-      txBox.add({'date': DateTime.now().toString(), 'type': 'Due', 'amount': total, 'method': 'Udhar', 'note': 'To ${name.text} - ${shop.text}'});
-    } else {
-      // Updates standard bank/cash storage directly
-      double currentBalance = walletBox.get(payment, defaultValue: 0.0);
-      walletBox.put(payment, currentBalance + total);
-
-      txBox.add({
-        'date': DateTime.now().toString(),
-        'type': 'Income',
-        'amount': total,
-        'method': payment,
-        'note': 'From ${name.text} - ${shop.text}'
-      });
-    }
-
-    String msg = "Order Receipt%0AName: ${name.text}%0AShop: ${shop.text}%0ABill: ${bill.text}%0ADelivery: ${delivery.text}%0ATotal: $total%0APaid via: $payment%0AThank you - Durshal Delivery";
-    String url = "https://wa.me/92${phone.text}?text=$msg";
-    if(await canLaunch(url)) launch(url);
-    Navigator.pop(context);
-  }
+class _NewOrderScreenState extends State<NewOrderScreen> {
+  final _nameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _amountController = TextEditingController();
+  String _selectedMethod = 'Cash';
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.order == null? "New Order" : "Edit Order"), backgroundColor: Color(0xFF1E3A8A)),
-      body: Padding(padding: EdgeInsets.all(16), child: ListView(children: [
-        TextField(controller: name, decoration: InputDecoration(labelText: "Customer Name")),
-        TextField(controller: phone, decoration: InputDecoration(labelText: "WhatsApp: 3xxxxxxxxx")),
-        TextField(controller: shop, decoration: InputDecoration(labelText: "Shop/Restaurant")),
-        TextField(controller: bill, decoration: InputDecoration(labelText: "Bill Amount"), keyboardType: TextInputType.number),
-        TextField(controller: delivery, decoration: InputDecoration(labelText: "Delivery Charge"), keyboardType: TextInputType.number),
-        DropdownButton(value: payment, isExpanded: true, items: ["Cash","Bank","Easypaisa","JazzCash","Udhar"].map((e)=>DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v)=>setState(()=>payment=v!)),
-        SizedBox(height: 20),
-        ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Color(0xFF1E3A8A)), onPressed: saveOrder, child: Text("Save + Send WhatsApp"))
-      ]))
+      appBar: AppBar(title: const Text('New Order')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Customer Name')),
+            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'WhatsApp Number (e.g. 923xxxxxxxx)')),
+            TextField(controller: _amountController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Bill Amount')),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedMethod,
+              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash', 'Udhar'].map((method) {
+                return DropdownMenuItem(value: method, child: Text(method));
+              }).toList(),
+              onChanged: (val) => setState(() => _selectedMethod = val!),
+              decoration: const InputDecoration(labelText: 'Initial Payment Mode/Status'),
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.secondary, 
+                foregroundColor: Colors.white, 
+                minimumSize: const Size.fromHeight(50)
+              ),
+              onPressed: () {
+                if (_nameController.text.isNotEmpty && _amountController.text.isNotEmpty) {
+                  widget.onSave(
+                    _nameController.text, 
+                    _phoneController.text, 
+                    double.parse(_amountController.text), 
+                    _selectedMethod
+                  );
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text('Save + Send WhatsApp'),
+            )
+          ],
+        ),
+      ),
     );
   }
 }
