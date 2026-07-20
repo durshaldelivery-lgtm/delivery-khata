@@ -37,6 +37,34 @@ class OrderItem {
   }
 }
 
+class PaymentReceipt {
+  final double amount;
+  final String sourceAccount;
+  final DateTime dateTime;
+
+  PaymentReceipt({
+    required this.amount,
+    required this.sourceAccount,
+    required this.dateTime,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'amount': amount,
+      'sourceAccount': sourceAccount,
+      'dateTime': dateTime.toIso8601String(),
+    };
+  }
+
+  factory PaymentReceipt.fromMap(Map<String, dynamic> map) {
+    return PaymentReceipt(
+      amount: (map['amount'] as num?)?.toDouble() ?? 0.0,
+      sourceAccount: map['sourceAccount'] ?? 'Cash',
+      dateTime: DateTime.parse(map['dateTime']),
+    );
+  }
+}
+
 class DeliveryOrder {
   final String id;
   final String customerName;
@@ -50,6 +78,7 @@ class DeliveryOrder {
   final String paymentMode; // Cash, Bank, EasyPaisa, JazzCash, Udhar
   final String status;      // Paid, Udhar
   final DateTime dateTime;
+  final List<PaymentReceipt> paymentHistory;
 
   DeliveryOrder({
     required this.id,
@@ -64,12 +93,14 @@ class DeliveryOrder {
     required this.paymentMode,
     required this.status,
     required this.dateTime,
+    this.paymentHistory = const [],
   });
 
   DeliveryOrder copyWith({
     double? paidAmount,
     double? remainingAmount,
     String? status,
+    List<PaymentReceipt>? paymentHistory,
   }) {
     return DeliveryOrder(
       id: id,
@@ -84,6 +115,7 @@ class DeliveryOrder {
       paymentMode: paymentMode,
       status: status ?? this.status,
       dateTime: dateTime,
+      paymentHistory: paymentHistory ?? this.paymentHistory,
     );
   }
 
@@ -101,6 +133,7 @@ class DeliveryOrder {
       'paymentMode': paymentMode,
       'status': status,
       'dateTime': dateTime.toIso8601String(),
+      'paymentHistory': paymentHistory.map((x) => x.toMap()).toList(),
     };
   }
 
@@ -118,6 +151,7 @@ class DeliveryOrder {
       paymentMode: map['paymentMode'] ?? 'Cash',
       status: map['status'] ?? 'Paid',
       dateTime: DateTime.parse(map['dateTime']),
+      paymentHistory: (map['paymentHistory'] as List? ?? []).map((x) => PaymentReceipt.fromMap(x)).toList(),
     );
   }
 }
@@ -328,10 +362,19 @@ class KhataBloc extends HydratedCubit<KhataState> {
         final finalRemaining = newRemaining > 0 ? newRemaining : 0.0;
         final newStatus = finalRemaining == 0 ? 'Paid' : 'Udhar';
 
+        final newReceipt = PaymentReceipt(
+          amount: paymentReceived,
+          sourceAccount: destinationAccount,
+          dateTime: DateTime.now(),
+        );
+
+        final updatedHistory = List<PaymentReceipt>.from(order.paymentHistory)..add(newReceipt);
+
         return order.copyWith(
           paidAmount: newPaid,
           remainingAmount: finalRemaining,
           status: newStatus,
+          paymentHistory: updatedHistory,
         );
       }
       return order;
@@ -367,7 +410,7 @@ class KhataBloc extends HydratedCubit<KhataState> {
     ));
   }
 
-  void injectMoney(String account, double amount) {
+  void injectOrWithdrawMoney(String account, double amount) {
     double c = state.wallet.cash;
     double b = state.wallet.bank;
     double ep = state.wallet.easyPaisa;
@@ -698,11 +741,20 @@ class DeliveriesScreen extends StatelessWidget {
                     children: [
                       const SizedBox(height: 4),
                       Text('Address: ${order.customerAddress}'),
-                      Text('Total Bill: Rs. ${order.totalAmount.toStringAsFixed(1)} (DC: Rs. ${order.deliveryCharges})'),
+                      Text('Total Bill: Rs. ${order.totalAmount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                       if (!isPaid) ...[
                         Text('Received: Rs. ${order.paidAmount.toStringAsFixed(1)}', style: const TextStyle(color: Colors.green)),
                         Text('Remaining Udhar: Rs. ${order.remainingAmount.toStringAsFixed(1)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                       ],
+                      if (order.paymentHistory.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        const Text('Payment Logs:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        ...order.paymentHistory.map((receipt) => Text(
+                          '• Rs. ${receipt.amount.toStringAsFixed(1)} via ${receipt.sourceAccount} on ${DateFormat('dd MMM, hh:mm a').format(receipt.dateTime)}',
+                          style: const TextStyle(fontSize: 11, color: Colors.black54),
+                        )),
+                      ],
+                      const SizedBox(height: 4),
                       Text(DateFormat('dd MMM yyyy, hh:mm a').format(order.dateTime), style: const TextStyle(fontSize: 11, color: Colors.grey)),
                     ],
                   ),
@@ -801,7 +853,7 @@ class _SettleUdharDialogState extends State<SettleUdharDialog> {
 }
 
 // ==========================================
-// 7. CUSTOMERS TAB
+// 7. CUSTOMERS TAB (WITH THREE-DOTS MENU)
 // ==========================================
 
 class CustomersScreen extends StatelessWidget {
@@ -839,35 +891,51 @@ class CustomersScreen extends StatelessWidget {
                   ),
                   title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Phone: ${c.phoneNumber}\nAddress: ${c.address}'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blue),
-                        onPressed: () => _openAddCustomerDialog(context, customerToEdit: c),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (value) {
+                      if (value == 'edit') {
+                        _openAddCustomerDialog(context, customerToEdit: c);
+                      } else if (value == 'delete') {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Delete Customer'),
+                            content: Text('Are you sure you want to delete ${c.name}?'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                              ElevatedButton(
+                                onPressed: () {
+                                  context.read<KhataBloc>().deleteCustomer(c.id);
+                                  Navigator.pop(ctx);
+                                },
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                              )
+                            ],
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (BuildContext context) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit, color: Colors.blue, size: 20),
+                            SizedBox(width: 8),
+                            Text('Edit'),
+                          ],
+                        ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Delete Customer'),
-                              content: Text('Are you sure you want to delete ${c.name}?'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                                ElevatedButton(
-                                  onPressed: () {
-                                    context.read<KhataBloc>().deleteCustomer(c.id);
-                                    Navigator.pop(ctx);
-                                  },
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text('Delete', style: TextStyle(color: Colors.white)),
-                                )
-                              ],
-                            ),
-                          );
-                        },
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, color: Colors.red, size: 20),
+                            SizedBox(width: 8),
+                            Text('Delete'),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -954,7 +1022,7 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 }
 
 // ==========================================
-// 8. WALLET TAB & INJECT MONEY
+// 8. WALLET TAB & INJECT/WITHDRAW
 // ==========================================
 
 class WalletScreen extends StatelessWidget {
@@ -976,7 +1044,7 @@ class WalletScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.add_card),
-            tooltip: 'Inject Money / Top-up',
+            tooltip: 'Deposit / Withdraw',
             onPressed: () => _openInjectMoneyDialog(context),
           ),
           IconButton(
@@ -1041,7 +1109,7 @@ class _InjectMoneyDialogState extends State<InjectMoneyDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Inject Money / Top-up Wallet'),
+      title: const Text('Deposit / Withdraw Money'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1054,8 +1122,11 @@ class _InjectMoneyDialogState extends State<InjectMoneyDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _amountController,
-            decoration: const InputDecoration(labelText: 'Amount (Rs.)', border: OutlineInputBorder()),
-            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'Amount (e.g. 500 or -500 to withdraw)',
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
           ),
         ],
       ),
@@ -1064,13 +1135,13 @@ class _InjectMoneyDialogState extends State<InjectMoneyDialog> {
         ElevatedButton(
           onPressed: () {
             final amt = double.tryParse(_amountController.text) ?? 0.0;
-            if (amt > 0) {
-              context.read<KhataBloc>().injectMoney(_selectedAccount, amt);
+            if (amt != 0) {
+              context.read<KhataBloc>().injectOrWithdrawMoney(_selectedAccount, amt);
             }
             Navigator.pop(context);
           },
           style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
-          child: const Text('Deposit Funds', style: TextStyle(color: Colors.white)),
+          child: const Text('Update Balance', style: TextStyle(color: Colors.white)),
         )
       ],
     );
@@ -1135,11 +1206,20 @@ class _TransferFundsDialogState extends State<TransferFundsDialog> {
 }
 
 // ==========================================
-// 9. HISTORY & SUMMARY TABS
+// 9. HISTORY TAB (FILTER BY TODAY, DATE & CUSTOMER)
 // ==========================================
 
-class HistoryScreen extends StatelessWidget {
+class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  String _filterType = 'Today'; // Today, All, Specific Date
+  DateTime? _selectedDate;
+  String? _selectedCustomerFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -1147,27 +1227,109 @@ class HistoryScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('History Logs')),
       body: BlocBuilder<KhataBloc, KhataState>(
         builder: (context, state) {
-          if (state.orders.isEmpty) {
-            return const Center(child: Text('History log is currently clean.'));
+          List<DeliveryOrder> filteredOrders = List.from(state.orders);
+
+          // Apply Date / Today Filter
+          if (_filterType == 'Today') {
+            final now = DateTime.now();
+            filteredOrders = filteredOrders.where((o) =>
+                o.dateTime.year == now.year &&
+                o.dateTime.month == now.month &&
+                o.dateTime.day == now.day).toList();
+          } else if (_filterType == 'Specific Date' && _selectedDate != null) {
+            filteredOrders = filteredOrders.where((o) =>
+                o.dateTime.year == _selectedDate!.year &&
+                o.dateTime.month == _selectedDate!.month &&
+                o.dateTime.day == _selectedDate!.day).toList();
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: state.orders.length,
-            itemBuilder: (context, index) {
-              final item = state.orders[index];
-              return Card(
-                child: ListTile(
-                  leading: Icon(
-                    item.status == 'Paid' ? Icons.check_circle : Icons.hourglass_top,
-                    color: item.status == 'Paid' ? Colors.green : DeliveryKhataApp.primaryRed,
-                  ),
-                  title: Text(item.customerName),
-                  subtitle: Text('Total: Rs. ${item.totalAmount} | Received: Rs. ${item.paidAmount}\nMode: ${item.paymentMode}'),
-                  trailing: Text(DateFormat('dd/MM\nhh:mm a').format(item.dateTime), textAlign: TextAlign.right),
+          // Apply Customer Filter
+          if (_selectedCustomerFilter != null && _selectedCustomerFilter != 'All Customers') {
+            filteredOrders = filteredOrders.where((o) => o.customerName == _selectedCustomerFilter).toList();
+          }
+
+          final customersList = ['All Customers', ...state.customers.map((c) => c.name).toSet()];
+
+          return Column(
+            children: [
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _filterType,
+                            decoration: const InputDecoration(labelText: 'Timeframe Filter', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                            items: ['Today', 'All', 'Specific Date'].map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
+                            onChanged: (val) async {
+                              if (val == 'Specific Date') {
+                                final picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime(2030),
+                                );
+                                if (picked != null) {
+                                  setState(() {
+                                    _filterType = 'Specific Date';
+                                    _selectedDate = picked;
+                                  });
+                                }
+                              } else {
+                                setState(() {
+                                  _filterType = val!;
+                                  _selectedDate = null;
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                        if (_filterType == 'Specific Date' && _selectedDate != null) ...[
+                          const SizedBox(width: 8),
+                          Text(DateFormat('dd/MM/yy').format(_selectedDate!), style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ]
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: _selectedCustomerFilter ?? 'All Customers',
+                      decoration: const InputDecoration(labelText: 'Filter By Customer', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                      items: customersList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedCustomerFilter = val;
+                        });
+                      },
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+              Expanded(
+                child: filteredOrders.isEmpty
+                    ? const Center(child: Text('No orders found for the selected filter.'))
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: filteredOrders.length,
+                        itemBuilder: (context, index) {
+                          final item = filteredOrders[index];
+                          return Card(
+                            child: ListTile(
+                              leading: Icon(
+                                item.status == 'Paid' ? Icons.check_circle : Icons.hourglass_top,
+                                color: item.status == 'Paid' ? Colors.green : DeliveryKhataApp.primaryRed,
+                              ),
+                              title: Text(item.customerName),
+                              subtitle: Text('Total: Rs. ${item.totalAmount} | Received: Rs. ${item.paidAmount}\nMode: ${item.paymentMode}'),
+                              trailing: Text(DateFormat('dd/MM\nhh:mm a').format(item.dateTime), textAlign: TextAlign.right),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           );
         },
       ),
@@ -1175,8 +1337,21 @@ class HistoryScreen extends StatelessWidget {
   }
 }
 
-class SummaryScreen extends StatelessWidget {
+// ==========================================
+// 10. SUMMARY TAB (WITH FILTERS)
+// ==========================================
+
+class SummaryScreen extends StatefulWidget {
   const SummaryScreen({super.key});
+
+  @override
+  State<SummaryScreen> createState() => _SummaryScreenState();
+}
+
+class _SummaryScreenState extends State<SummaryScreen> {
+  String _filterType = 'All Time'; // All Time, Today, Specific Date
+  DateTime? _selectedDate;
+  String? _selectedCustomerFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -1184,11 +1359,32 @@ class SummaryScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Summary Overview')),
       body: BlocBuilder<KhataBloc, KhataState>(
         builder: (context, state) {
+          List<DeliveryOrder> filteredOrders = List.from(state.orders);
+
+          if (_filterType == 'Today') {
+            final now = DateTime.now();
+            filteredOrders = filteredOrders.where((o) =>
+                o.dateTime.year == now.year &&
+                o.dateTime.month == now.month &&
+                o.dateTime.day == now.day).toList();
+          } else if (_filterType == 'Specific Date' && _selectedDate != null) {
+            filteredOrders = filteredOrders.where((o) =>
+                o.dateTime.year == _selectedDate!.year &&
+                o.dateTime.month == _selectedDate!.month &&
+                o.dateTime.day == _selectedDate!.day).toList();
+          }
+
+          if (_selectedCustomerFilter != null && _selectedCustomerFilter != 'All Customers') {
+            filteredOrders = filteredOrders.where((o) => o.customerName == _selectedCustomerFilter).toList();
+          }
+
+          final customersList = ['All Customers', ...state.customers.map((c) => c.name).toSet()];
+
           double totalEarned = 0.0;
           double totalUdhar = 0.0;
           int completedDeliveries = 0;
 
-          for (var order in state.orders) {
+          for (var order in filteredOrders) {
             totalEarned += order.paidAmount;
             totalUdhar += order.remainingAmount;
             if (order.status == 'Paid') {
@@ -1201,8 +1397,54 @@ class SummaryScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Business Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _filterType,
+                        decoration: const InputDecoration(labelText: 'Period', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                        items: ['All Time', 'Today', 'Specific Date'].map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
+                        onChanged: (val) async {
+                          if (val == 'Specific Date') {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (picked != null) {
+                              setState(() {
+                                _filterType = 'Specific Date';
+                                _selectedDate = picked;
+                              });
+                            }
+                          } else {
+                            setState(() {
+                              _filterType = val!;
+                              _selectedDate = null;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedCustomerFilter ?? 'All Customers',
+                        decoration: const InputDecoration(labelText: 'Customer', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                        items: customersList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedCustomerFilter = val;
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 20),
+                const Text('Business Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
                 _buildMetricCard('Total Received Income', 'Rs. ${totalEarned.toStringAsFixed(1)}', Colors.green, Icons.monetization_on),
                 _buildMetricCard('Outstanding Market Udhar', 'Rs. ${totalUdhar.toStringAsFixed(1)}', DeliveryKhataApp.primaryRed, Icons.hourglass_empty),
                 _buildMetricCard('Completed Orders', '$completedDeliveries Orders', Colors.blue, Icons.local_shipping),
@@ -1228,7 +1470,7 @@ class SummaryScreen extends StatelessWidget {
 }
 
 // ==========================================
-// 10. NEW ORDER BOTTOM SHEET (DYNAMIC ITEMS & AUTOMATED CALCULATIONS)
+// 11. NEW ORDER BOTTOM SHEET (SINGLE ITEM ADD & DIRECT WHATSAPP)
 // ==========================================
 
 class NewOrderBottomSheet extends StatefulWidget {
@@ -1240,22 +1482,17 @@ class NewOrderBottomSheet extends StatefulWidget {
 
 class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
   Customer? _selectedCustomer;
-  final _phoneController = TextEditingController();
-  final _addressController = TextEditingController();
   final _deliveryChargesController = TextEditingController(text: '0');
-  
   String _selectedPaymentMode = 'Cash';
 
-  List<OrderItem> _items = [
+  final List<OrderItem> _items = [
     OrderItem(),
     OrderItem(),
     OrderItem(),
   ];
 
-  void _addThreeMoreItems() {
+  void _addSingleItem() {
     setState(() {
-      _items.add(OrderItem());
-      _items.add(OrderItem());
       _items.add(OrderItem());
     });
   }
@@ -1280,11 +1517,19 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
     }
 
     final message = "Hello $name, your order from Durshal Delivery has been placed. Grand Total: Rs. ${totalAmount.toStringAsFixed(1)}. Thank you!";
-    final url = "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}";
+    final encodedMsg = Uri.encodeComponent(message);
 
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final whatsappUri = Uri.parse("whatsapp://send?phone=$cleanPhone&text=$encodedMsg");
+    final webUri = Uri.parse("https://wa.me/$cleanPhone?text=$encodedMsg");
+
+    try {
+      if (await canLaunchUrl(whatsappUri)) {
+        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+      } else if (await canLaunchUrl(webUri)) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -1315,7 +1560,6 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
             ),
             const SizedBox(height: 10),
 
-            // Select Customer Dropdown
             DropdownButtonFormField<Customer>(
               value: _selectedCustomer,
               decoration: const InputDecoration(labelText: 'Select Registered Customer', border: OutlineInputBorder()),
@@ -1328,23 +1572,14 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
               onChanged: (val) {
                 setState(() {
                   _selectedCustomer = val;
-                  if (val != null) {
-                    _phoneController.text = val.phoneNumber;
-                    _addressController.text = val.address;
-                  }
                 });
               },
             ),
-            const SizedBox(height: 10),
-            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'WhatsApp Phone Number', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
-            const SizedBox(height: 10),
-            TextField(controller: _addressController, decoration: const InputDecoration(labelText: 'Delivery Address', border: OutlineInputBorder())),
-            
+
             const Divider(height: 30, thickness: 1.5),
             const Text('Order Items Breakdown', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
 
-            // Items Rows
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -1395,9 +1630,9 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
 
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: _addThreeMoreItems,
+              onPressed: _addSingleItem,
               icon: const Icon(Icons.add),
-              label: const Text('Add 3 More Items'),
+              label: const Text('Add Item'),
             ),
 
             const SizedBox(height: 12),
@@ -1432,11 +1667,16 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () {
-                if (_selectedCustomer == null && _phoneController.text.isEmpty) return;
+                if (_selectedCustomer == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please select a registered customer first.')),
+                  );
+                  return;
+                }
 
-                final custName = _selectedCustomer?.name ?? 'Guest Customer';
-                final phone = _phoneController.text;
-                final address = _addressController.text;
+                final custName = _selectedCustomer!.name;
+                final phone = _selectedCustomer!.phoneNumber;
+                final address = _selectedCustomer!.address;
                 final dc = double.tryParse(_deliveryChargesController.text) ?? 0.0;
                 final total = _grandTotal;
 
