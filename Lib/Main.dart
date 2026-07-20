@@ -853,6 +853,229 @@ class _SettleUdharDialogState extends State<SettleUdharDialog> {
 }
 
 // ==========================================
+// NEW ORDER BOTTOM SHEET (WITH ROMAN URDU & WHATSAPP)
+// ==========================================
+
+class NewOrderBottomSheet extends StatefulWidget {
+  const NewOrderBottomSheet({super.key});
+
+  @override
+  State<NewOrderBottomSheet> createState() => _NewOrderBottomSheetState();
+}
+
+class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
+  final _phoneController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _deliveryChargesController = TextEditingController(text: '100');
+  final _advancePaidController = TextEditingController(text: '0');
+
+  List<OrderItem> items = [OrderItem(name: '', quantity: 1, price: 0.0)];
+  String _paymentMode = 'Cash';
+  bool _isUdhar = false;
+
+  void _sendWhatsAppMessage(String phone, String details, double total) async {
+    String cleanPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '92${cleanPhone.substring(1)}';
+    } else if (cleanPhone.startsWith('+92')) {
+      cleanPhone = cleanPhone.substring(1);
+    }
+
+    // Romanized Urdu Message Format (Without customer name)
+    String rawMessage = "Assalam-o-Alaikum!\n"
+        "Dear Customer, aap ka order mawasool ho gaya hai.\n\n"
+        "Order Details:\n$details\n\n"
+        "Total Amount: Rs. ${total.toStringAsFixed(1)}\n\n"
+        "Shukriya!\n"
+        "Durshal Delivery";
+
+    String encodedMessage = Uri.encodeComponent(rawMessage);
+    final Uri primaryUri = Uri.parse("https://wa.me/$cleanPhone?text=$encodedMessage");
+    final Uri fallbackUri = Uri.parse("whatsapp://send?phone=$cleanPhone&text=$encodedMessage");
+
+    try {
+      if (await canLaunchUrl(primaryUri)) {
+        await launchUrl(primaryUri, mode: LaunchMode.externalApplication);
+      } else if (await canLaunchUrl(fallbackUri)) {
+        await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('WhatsApp application not found.')),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("WhatsApp Error: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    double itemsTotal = items.fold(0, (sum, i) => sum + (i.quantity * i.price));
+    double delivery = double.tryParse(_deliveryChargesController.text) ?? 0.0;
+    double grandTotal = itemsTotal + delivery;
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        top: 20, left: 20, right: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Create New Order', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 15),
+            TextField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Customer Phone', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: 'Customer Name', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _addressController,
+              decoration: const InputDecoration(labelText: 'Customer Address', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 15),
+            const Text('Items:', style: TextStyle(fontWeight: FontWeight.bold)),
+            ...items.asMap().entries.map((entry) {
+              int idx = entry.key;
+              OrderItem item = entry.value;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        decoration: const InputDecoration(labelText: 'Item Name', isDense: true, border: OutlineInputBorder()),
+                        onChanged: (val) => item.name = val,
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      flex: 1,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Qty', isDense: true, border: OutlineInputBorder()),
+                        onChanged: (val) => setState(() => item.quantity = int.tryParse(val) ?? 1),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Price', isDense: true, border: OutlineInputBorder()),
+                        onChanged: (val) => setState(() => item.price = double.tryParse(val) ?? 0.0),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            TextButton.icon(
+              onPressed: () => setState(() => items.add(OrderItem())),
+              icon: const Icon(Icons.add),
+              label: const Text('Add Another Item'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _deliveryChargesController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Delivery Charges (Rs.)', border: OutlineInputBorder()),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 15),
+            Row(
+              children: [
+                Checkbox(
+                  value: _isUdhar,
+                  onChanged: (val) => setState(() => _isUdhar = val ?? false),
+                ),
+                const Text('Mark as Udhar / Partial Payment'),
+              ],
+            ),
+            if (_isUdhar) ...[
+              TextField(
+                controller: _advancePaidController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Advance Paid (Rs.)', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+            ],
+            DropdownButtonFormField<String>(
+              value: _paymentMode,
+              decoration: const InputDecoration(labelText: 'Payment Account', border: OutlineInputBorder()),
+              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+              onChanged: (val) => setState(() => _paymentMode = val!),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: DeliveryKhataApp.primaryRed,
+                minimumSize: const Size.fromHeight(50),
+              ),
+              onPressed: () {
+                if (_phoneController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter customer phone number')),
+                  );
+                  return;
+                }
+
+                double advance = _isUdhar ? (double.tryParse(_advancePaidController.text) ?? 0.0) : grandTotal;
+                double remaining = grandTotal - advance;
+
+                final newOrder = DeliveryOrder(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  customerName: _nameController.text.isEmpty ? 'Guest Customer' : _nameController.text,
+                  phoneNumber: _phoneController.text,
+                  customerAddress: _addressController.text,
+                  items: items,
+                  deliveryCharges: delivery,
+                  totalAmount: grandTotal,
+                  paidAmount: advance,
+                  remainingAmount: remaining > 0 ? remaining : 0.0,
+                  paymentMode: _paymentMode,
+                  status: (_isUdhar && remaining > 0) ? 'Udhar' : 'Paid',
+                  dateTime: DateTime.now(),
+                );
+
+                context.read<KhataBloc>().addOrder(newOrder);
+
+                String detailsText = items
+                    .where((i) => i.name.isNotEmpty)
+                    .map((i) => "• ${i.name} (x${i.quantity}) - Rs. ${i.price * i.quantity}")
+                    .join("\n");
+                if (detailsText.isEmpty) detailsText = "Standard Order";
+                detailsText += "\nDelivery Charges: Rs. $delivery";
+
+                _sendWhatsAppMessage(_phoneController.text, detailsText, grandTotal);
+                Navigator.pop(context);
+              },
+              child: const Text('Save Order & Launch WhatsApp', style: TextStyle(color: Colors.white, fontSize: 16)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
 // 7. CUSTOMERS TAB (WITH THREE-DOTS MENU)
 // ==========================================
 
@@ -948,7 +1171,7 @@ class CustomersScreen extends StatelessWidget {
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openAddCustomerDialog(context),
         backgroundColor: DeliveryKhataApp.primaryRed,
-        child: const Icon(Icons.person_add, color: Colors.white),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
@@ -977,44 +1200,38 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isEdit = widget.customerToEdit != null;
-
+    final isEditing = widget.customerToEdit != null;
     return AlertDialog(
-      title: Text(isEdit ? 'Edit Customer' : 'Add New Customer'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Customer Name', border: OutlineInputBorder())),
-            const SizedBox(height: 12),
-            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'WhatsApp Phone Number', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
-            const SizedBox(height: 12),
-            TextField(controller: _addressController, decoration: const InputDecoration(labelText: 'Address', border: OutlineInputBorder())),
-          ],
-        ),
+      title: Text(isEditing ? 'Edit Customer' : 'Add New Customer'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Name')),
+          TextField(controller: _phoneController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone Number')),
+          TextField(controller: _addressController, decoration: const InputDecoration(labelText: 'Address')),
+        ],
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         ElevatedButton(
           onPressed: () {
-            if (_nameController.text.isEmpty) return;
-
-            final customer = Customer(
-              id: widget.customerToEdit?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-              name: _nameController.text,
-              phoneNumber: _phoneController.text,
-              address: _addressController.text,
-            );
-
-            if (isEdit) {
-              context.read<KhataBloc>().editCustomer(customer);
-            } else {
-              context.read<KhataBloc>().addCustomer(customer);
+            if (_nameController.text.isNotEmpty) {
+              final cust = Customer(
+                id: isEditing ? widget.customerToEdit!.id : DateTime.now().millisecondsSinceEpoch.toString(),
+                name: _nameController.text,
+                phoneNumber: _phoneController.text,
+                address: _addressController.text,
+              );
+              if (isEditing) {
+                context.read<KhataBloc>().editCustomer(cust);
+              } else {
+                context.read<KhataBloc>().addCustomer(cust);
+              }
+              Navigator.pop(context);
             }
-            Navigator.pop(context);
           },
           style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
-          child: Text(isEdit ? 'Update' : 'Save Customer', style: const TextStyle(color: Colors.white)),
+          child: Text(isEditing ? 'Update' : 'Save', style: const TextStyle(color: Colors.white)),
         )
       ],
     );
@@ -1022,432 +1239,49 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 }
 
 // ==========================================
-// 8. WALLET TAB & INJECT/WITHDRAW
+// 8. WALLET TAB
 // ==========================================
 
 class WalletScreen extends StatelessWidget {
   const WalletScreen({super.key});
 
-  void _openTransferFundsDialog(BuildContext context) {
-    showDialog(context: context, builder: (context) => const TransferFundsDialog());
-  }
-
-  void _openInjectMoneyDialog(BuildContext context) {
-    showDialog(context: context, builder: (context) => const InjectMoneyDialog());
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Wallet Ledger'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_card),
-            tooltip: 'Deposit / Withdraw',
-            onPressed: () => _openInjectMoneyDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.swap_horiz),
-            tooltip: 'Transfer Balance',
-            onPressed: () => _openTransferFundsDialog(context),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Wallet Balances')),
       body: BlocBuilder<KhataBloc, KhataState>(
         builder: (context, state) {
-          final w = state.wallet;
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _buildWalletCard('Cash Account', w.cash, Colors.green),
-              _buildWalletCard('Bank Account', w.bank, Colors.blue),
-              _buildWalletCard('EasyPaisa Account', w.easyPaisa, Colors.lightGreen),
-              _buildWalletCard('JazzCash Account', w.jazzCash, DeliveryKhataApp.primaryRed),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildWalletCard(String title, double balance, Color accentColor) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(width: 5, height: 25, color: accentColor),
-                const SizedBox(width: 12),
-                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            Text('Rs. ${balance.toStringAsFixed(1)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class InjectMoneyDialog extends StatefulWidget {
-  const InjectMoneyDialog({super.key});
-
-  @override
-  State<InjectMoneyDialog> createState() => _InjectMoneyDialogState();
-}
-
-class _InjectMoneyDialogState extends State<InjectMoneyDialog> {
-  String _selectedAccount = 'Cash';
-  final _amountController = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Deposit / Withdraw Money'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DropdownButtonFormField<String>(
-            value: _selectedAccount,
-            decoration: const InputDecoration(labelText: 'Target Account'),
-            items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
-            onChanged: (val) => setState(() => _selectedAccount = val!),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _amountController,
-            decoration: const InputDecoration(
-              labelText: 'Amount (e.g. 500 or -500 to withdraw)',
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        ElevatedButton(
-          onPressed: () {
-            final amt = double.tryParse(_amountController.text) ?? 0.0;
-            if (amt != 0) {
-              context.read<KhataBloc>().injectOrWithdrawMoney(_selectedAccount, amt);
-            }
-            Navigator.pop(context);
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
-          child: const Text('Update Balance', style: TextStyle(color: Colors.white)),
-        )
-      ],
-    );
-  }
-}
-
-class TransferFundsDialog extends StatefulWidget {
-  const TransferFundsDialog({super.key});
-
-  @override
-  State<TransferFundsDialog> createState() => _TransferFundsDialogState();
-}
-
-class _TransferFundsDialogState extends State<TransferFundsDialog> {
-  String _fromWallet = 'Cash';
-  String _toWallet = 'Bank';
-  final _amountController = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Transfer Funds Between Accounts'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DropdownButtonFormField<String>(
-            value: _fromWallet,
-            decoration: const InputDecoration(labelText: 'Source Account'),
-            items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-            onChanged: (val) => setState(() => _fromWallet = val!),
-          ),
-          DropdownButtonFormField<String>(
-            value: _toWallet,
-            decoration: const InputDecoration(labelText: 'Destination Account'),
-            items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-            onChanged: (val) => setState(() => _toWallet = val!),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _amountController,
-            decoration: const InputDecoration(labelText: 'Transfer Amount (Rs.)', border: OutlineInputBorder()),
-            keyboardType: TextInputType.number,
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        ElevatedButton(
-          onPressed: () {
-            final amt = double.tryParse(_amountController.text) ?? 0.0;
-            if (amt > 0 && _fromWallet != _toWallet) {
-              context.read<KhataBloc>().transferFunds(_fromWallet, _toWallet, amt);
-            }
-            Navigator.pop(context);
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
-          child: const Text('Transfer', style: TextStyle(color: Colors.white)),
-        )
-      ],
-    );
-  }
-}
-
-// ==========================================
-// 9. HISTORY TAB (FILTER BY TODAY, DATE & CUSTOMER)
-// ==========================================
-
-class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key});
-
-  @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
-}
-
-class _HistoryScreenState extends State<HistoryScreen> {
-  String _filterType = 'Today'; // Today, All, Specific Date
-  DateTime? _selectedDate;
-  String? _selectedCustomerFilter;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('History Logs')),
-      body: BlocBuilder<KhataBloc, KhataState>(
-        builder: (context, state) {
-          List<DeliveryOrder> filteredOrders = List.from(state.orders);
-
-          // Apply Date / Today Filter
-          if (_filterType == 'Today') {
-            final now = DateTime.now();
-            filteredOrders = filteredOrders.where((o) =>
-                o.dateTime.year == now.year &&
-                o.dateTime.month == now.month &&
-                o.dateTime.day == now.day).toList();
-          } else if (_filterType == 'Specific Date' && _selectedDate != null) {
-            filteredOrders = filteredOrders.where((o) =>
-                o.dateTime.year == _selectedDate!.year &&
-                o.dateTime.month == _selectedDate!.month &&
-                o.dateTime.day == _selectedDate!.day).toList();
-          }
-
-          // Apply Customer Filter
-          if (_selectedCustomerFilter != null && _selectedCustomerFilter != 'All Customers') {
-            filteredOrders = filteredOrders.where((o) => o.customerName == _selectedCustomerFilter).toList();
-          }
-
-          final customersList = ['All Customers', ...state.customers.map((c) => c.name).toSet()];
-
-          return Column(
-            children: [
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: _filterType,
-                            decoration: const InputDecoration(labelText: 'Timeframe Filter', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                            items: ['Today', 'All', 'Specific Date'].map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
-                            onChanged: (val) async {
-                              if (val == 'Specific Date') {
-                                final picked = await showDatePicker(
-                                  context: context,
-                                  initialDate: DateTime.now(),
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime(2030),
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    _filterType = 'Specific Date';
-                                    _selectedDate = picked;
-                                  });
-                                }
-                              } else {
-                                setState(() {
-                                  _filterType = val!;
-                                  _selectedDate = null;
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                        if (_filterType == 'Specific Date' && _selectedDate != null) ...[
-                          const SizedBox(width: 8),
-                          Text(DateFormat('dd/MM/yy').format(_selectedDate!), style: const TextStyle(fontWeight: FontWeight.bold)),
-                        ]
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: _selectedCustomerFilter ?? 'All Customers',
-                      decoration: const InputDecoration(labelText: 'Filter By Customer', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                      items: customersList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedCustomerFilter = val;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: filteredOrders.isEmpty
-                    ? const Center(child: Text('No orders found for the selected filter.'))
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(12),
-                        itemCount: filteredOrders.length,
-                        itemBuilder: (context, index) {
-                          final item = filteredOrders[index];
-                          return Card(
-                            child: ListTile(
-                              leading: Icon(
-                                item.status == 'Paid' ? Icons.check_circle : Icons.hourglass_top,
-                                color: item.status == 'Paid' ? Colors.green : DeliveryKhataApp.primaryRed,
-                              ),
-                              title: Text(item.customerName),
-                              subtitle: Text('Total: Rs. ${item.totalAmount} | Received: Rs. ${item.paidAmount}\nMode: ${item.paymentMode}'),
-                              trailing: Text(DateFormat('dd/MM\nhh:mm a').format(item.dateTime), textAlign: TextAlign.right),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ==========================================
-// 10. SUMMARY TAB (WITH FILTERS)
-// ==========================================
-
-class SummaryScreen extends StatefulWidget {
-  const SummaryScreen({super.key});
-
-  @override
-  State<SummaryScreen> createState() => _SummaryScreenState();
-}
-
-class _SummaryScreenState extends State<SummaryScreen> {
-  String _filterType = 'All Time'; // All Time, Today, Specific Date
-  DateTime? _selectedDate;
-  String? _selectedCustomerFilter;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Summary Overview')),
-      body: BlocBuilder<KhataBloc, KhataState>(
-        builder: (context, state) {
-          List<DeliveryOrder> filteredOrders = List.from(state.orders);
-
-          if (_filterType == 'Today') {
-            final now = DateTime.now();
-            filteredOrders = filteredOrders.where((o) =>
-                o.dateTime.year == now.year &&
-                o.dateTime.month == now.month &&
-                o.dateTime.day == now.day).toList();
-          } else if (_filterType == 'Specific Date' && _selectedDate != null) {
-            filteredOrders = filteredOrders.where((o) =>
-                o.dateTime.year == _selectedDate!.year &&
-                o.dateTime.month == _selectedDate!.month &&
-                o.dateTime.day == _selectedDate!.day).toList();
-          }
-
-          if (_selectedCustomerFilter != null && _selectedCustomerFilter != 'All Customers') {
-            filteredOrders = filteredOrders.where((o) => o.customerName == _selectedCustomerFilter).toList();
-          }
-
-          final customersList = ['All Customers', ...state.customers.map((c) => c.name).toSet()];
-
-          double totalEarned = 0.0;
-          double totalUdhar = 0.0;
-          int completedDeliveries = 0;
-
-          for (var order in filteredOrders) {
-            totalEarned += order.paidAmount;
-            totalUdhar += order.remainingAmount;
-            if (order.status == 'Paid') {
-              completedDeliveries++;
-            }
-          }
+          final total = state.wallet.cash + state.wallet.bank + state.wallet.easyPaisa + state.wallet.jazzCash;
 
           return Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _filterType,
-                        decoration: const InputDecoration(labelText: 'Period', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                        items: ['All Time', 'Today', 'Specific Date'].map((f) => DropdownMenuItem(value: f, child: Text(f))).toList(),
-                        onChanged: (val) async {
-                          if (val == 'Specific Date') {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: DateTime.now(),
-                              firstDate: DateTime(2020),
-                              lastDate: DateTime(2030),
-                            );
-                            if (picked != null) {
-                              setState(() {
-                                _filterType = 'Specific Date';
-                                _selectedDate = picked;
-                              });
-                            }
-                          } else {
-                            setState(() {
-                              _filterType = val!;
-                              _selectedDate = null;
-                            });
-                          }
-                        },
-                      ),
+                Card(
+                  color: DeliveryKhataApp.primaryRed,
+                  child: Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: Column(
+                      children: [
+                        const Text('TOTAL WALLET BALANCE', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                        const SizedBox(height: 8),
+                        Text('Rs. ${total.toStringAsFixed(1)}',
+                            style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedCustomerFilter ?? 'All Customers',
-                        decoration: const InputDecoration(labelText: 'Customer', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
-                        items: customersList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                        onChanged: (val) {
-                          setState(() {
-                            _selectedCustomerFilter = val;
-                          });
-                        },
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 20),
-                const Text('Business Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 16),
-                _buildMetricCard('Total Received Income', 'Rs. ${totalEarned.toStringAsFixed(1)}', Colors.green, Icons.monetization_on),
-                _buildMetricCard('Outstanding Market Udhar', 'Rs. ${totalUdhar.toStringAsFixed(1)}', DeliveryKhataApp.primaryRed, Icons.hourglass_empty),
-                _buildMetricCard('Completed Orders', '$completedDeliveries Orders', Colors.blue, Icons.local_shipping),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      _walletTile('Cash', state.wallet.cash, Colors.green),
+                      _walletTile('Bank', state.wallet.bank, Colors.blue),
+                      _walletTile('EasyPaisa', state.wallet.easyPaisa, Colors.lightGreen),
+                      _walletTile('JazzCash', state.wallet.jazzCash, Colors.orange),
+                    ],
+                  ),
+                )
               ],
             ),
           );
@@ -1456,263 +1290,97 @@ class _SummaryScreenState extends State<SummaryScreen> {
     );
   }
 
-  Widget _buildMetricCard(String title, String value, Color col, IconData icon) {
+  Widget _walletTile(String title, double balance, Color color) {
     return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 8),
       child: ListTile(
-        leading: CircleAvatar(backgroundColor: col.withOpacity(0.1), child: Icon(icon, color: col)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
-        trailing: Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: col)),
+        leading: CircleAvatar(backgroundColor: color, child: const Icon(Icons.account_balance_wallet, color: Colors.white)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        trailing: Text('Rs. ${balance.toStringAsFixed(1)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       ),
     );
   }
 }
 
 // ==========================================
-// 11. NEW ORDER BOTTOM SHEET (SINGLE ITEM ADD & DIRECT WHATSAPP)
+// 9. HISTORY TAB
 // ==========================================
 
-class NewOrderBottomSheet extends StatefulWidget {
-  const NewOrderBottomSheet({super.key});
-
-  @override
-  State<NewOrderBottomSheet> createState() => _NewOrderBottomSheetState();
-}
-
-class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
-  Customer? _selectedCustomer;
-  final _deliveryChargesController = TextEditingController(text: '0');
-  String _selectedPaymentMode = 'Cash';
-
-  final List<OrderItem> _items = [
-    OrderItem(),
-    OrderItem(),
-    OrderItem(),
-  ];
-
-  void _addSingleItem() {
-    setState(() {
-      _items.add(OrderItem());
-    });
-  }
-
-  double get _itemsSubtotal {
-    double sum = 0.0;
-    for (var item in _items) {
-      sum += (item.quantity * item.price);
-    }
-    return sum;
-  }
-
-  double get _grandTotal {
-    final dc = double.tryParse(_deliveryChargesController.text) ?? 0.0;
-    return _itemsSubtotal + dc;
-  }
-
-  void _triggerWhatsAppMessage(String name, String phone, double totalAmount) async {
-    String cleanPhone = phone.replaceAll(RegExp(r'\+|\s+|-'), '');
-    if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
-      cleanPhone = '92${cleanPhone.substring(1)}';
-    }
-
-    final message = "Hello $name, your order from Durshal Delivery has been placed. Grand Total: Rs. ${totalAmount.toStringAsFixed(1)}. Thank you!";
-    final encodedMsg = Uri.encodeComponent(message);
-
-    final whatsappUri = Uri.parse("whatsapp://send?phone=$cleanPhone&text=$encodedMsg");
-    final webUri = Uri.parse("https://wa.me/$cleanPhone?text=$encodedMsg");
-
-    try {
-      if (await canLaunchUrl(whatsappUri)) {
-        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
-      } else if (await canLaunchUrl(webUri)) {
-        await launchUrl(webUri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {
-      await launchUrl(webUri, mode: LaunchMode.externalApplication);
-    }
-  }
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final customersList = context.watch<KhataBloc>().state.customers;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Order History')),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          if (state.orders.isEmpty) {
+            return const Center(child: Text('No order history available.'));
+          }
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: state.orders.length,
+            itemBuilder: (context, index) {
+              final order = state.orders[index];
+              return Card(
+                child: ListTile(
+                  title: Text(order.customerName),
+                  subtitle: Text(DateFormat('dd MMM yyyy, hh:mm a').format(order.dateTime)),
+                  trailing: Text('Rs. ${order.totalAmount.toStringAsFixed(1)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              );
+            },
+          );
+        },
       ),
-      padding: EdgeInsets.only(
-        top: 20, left: 16, right: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    );
+  }
+}
+
+// ==========================================
+// 10. SUMMARY TAB
+// ==========================================
+
+class SummaryScreen extends StatelessWidget {
+  const SummaryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Business Analytics')),
+      body: BlocBuilder<KhataBloc, KhataState>(
+        builder: (context, state) {
+          final totalOrders = state.orders.length;
+          final totalUdhar = state.orders.fold(0.0, (sum, o) => sum + o.remainingAmount);
+          final totalRevenue = state.orders.fold(0.0, (sum, o) => sum + o.paidAmount);
+
+          return Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
               children: [
-                const Text('New Delivery Order', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                _summaryCard('Total Orders', '$totalOrders', Colors.blue),
+                _summaryCard('Collected Revenue', 'Rs. ${totalRevenue.toStringAsFixed(1)}', Colors.green),
+                _summaryCard('Total Active Udhar', 'Rs. ${totalUdhar.toStringAsFixed(1)}', Colors.red),
               ],
             ),
-            const SizedBox(height: 10),
+          );
+        },
+      ),
+    );
+  }
 
-            DropdownButtonFormField<Customer>(
-              value: _selectedCustomer,
-              decoration: const InputDecoration(labelText: 'Select Registered Customer', border: OutlineInputBorder()),
-              items: customersList.map((c) {
-                return DropdownMenuItem<Customer>(
-                  value: c,
-                  child: Text('${c.name} (${c.phoneNumber})'),
-                );
-              }).toList(),
-              onChanged: (val) {
-                setState(() {
-                  _selectedCustomer = val;
-                });
-              },
-            ),
-
-            const Divider(height: 30, thickness: 1.5),
-            const Text('Order Items Breakdown', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: TextField(
-                          decoration: InputDecoration(labelText: 'Item ${index + 1} Name', border: const OutlineInputBorder()),
-                          onChanged: (val) => _items[index].name = val,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          decoration: const InputDecoration(labelText: 'Qty', border: OutlineInputBorder()),
-                          keyboardType: TextInputType.number,
-                          onChanged: (val) {
-                            setState(() {
-                              _items[index].quantity = int.tryParse(val) ?? 1;
-                            });
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          decoration: const InputDecoration(labelText: 'Price', border: OutlineInputBorder()),
-                          keyboardType: TextInputType.number,
-                          onChanged: (val) {
-                            setState(() {
-                              _items[index].price = double.tryParse(val) ?? 0.0;
-                            });
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _addSingleItem,
-              icon: const Icon(Icons.add),
-              label: const Text('Add Item'),
-            ),
-
-            const SizedBox(height: 12),
-            TextField(
-              controller: _deliveryChargesController,
-              decoration: const InputDecoration(labelText: 'Delivery Charges (Rs.)', border: OutlineInputBorder()),
-              keyboardType: TextInputType.number,
-              onChanged: (_) => setState(() {}),
-            ),
-
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              color: Colors.grey.shade100,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Grand Total Bill:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  Text('Rs. ${_grandTotal.toStringAsFixed(1)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: DeliveryKhataApp.primaryRed)),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedPaymentMode,
-              decoration: const InputDecoration(labelText: 'Payment Gateway Mode', border: OutlineInputBorder()),
-              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash', 'Udhar'].map((mode) => DropdownMenuItem(value: mode, child: Text(mode))).toList(),
-              onChanged: (val) => setState(() => _selectedPaymentMode = val!),
-            ),
-
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                if (_selectedCustomer == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please select a registered customer first.')),
-                  );
-                  return;
-                }
-
-                final custName = _selectedCustomer!.name;
-                final phone = _selectedCustomer!.phoneNumber;
-                final address = _selectedCustomer!.address;
-                final dc = double.tryParse(_deliveryChargesController.text) ?? 0.0;
-                final total = _grandTotal;
-
-                final isUdhar = _selectedPaymentMode == 'Udhar';
-                final initialPaid = isUdhar ? 0.0 : total;
-                final initialRemaining = isUdhar ? total : 0.0;
-                final initialStatus = isUdhar ? 'Udhar' : 'Paid';
-
-                final order = DeliveryOrder(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  customerName: custName,
-                  phoneNumber: phone,
-                  customerAddress: address,
-                  items: _items.where((i) => i.name.isNotEmpty).toList(),
-                  deliveryCharges: dc,
-                  totalAmount: total,
-                  paidAmount: initialPaid,
-                  remainingAmount: initialRemaining,
-                  paymentMode: _selectedPaymentMode,
-                  status: initialStatus,
-                  dateTime: DateTime.now(),
-                );
-
-                context.read<KhataBloc>().addOrder(order);
-                Navigator.pop(context);
-
-                if (phone.isNotEmpty) {
-                  _triggerWhatsAppMessage(custName, phone, total);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: DeliveryKhataApp.primaryRed,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              child: const Text('Place Order + Send WhatsApp Message', style: TextStyle(color: Colors.white, fontSize: 16)),
-            ),
+  Widget _summaryCard(String title, String value, Color color) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
           ],
         ),
       ),
