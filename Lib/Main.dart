@@ -115,7 +115,7 @@ class WalletStateData {
 }
 
 // ==========================================
-// 2. STATE MANAGEMENT (HYDRATED BLOC FOR DATA RETENTION)
+// 2. STATE MANAGEMENT (HYDRATED BLOC)
 // ==========================================
 
 class KhataState {
@@ -191,8 +191,21 @@ class KhataBloc extends HydratedCubit<KhataState> {
   }
 
   void updateOrderStatus(String id, String newStatus) {
+    double c = state.wallet.cash;
+    double b = state.wallet.bank;
+    double ep = state.wallet.easyPaisa;
+    double jc = state.wallet.jazzCash;
+
     final updatedOrders = state.orders.map((order) {
       if (order.id == id) {
+        if (order.status != 'Paid' && newStatus == 'Paid') {
+          switch (order.paymentMode) {
+            case 'Cash': c += order.billAmount; break;
+            case 'Bank': b += order.billAmount; break;
+            case 'EasyPaisa': ep += order.billAmount; break;
+            case 'JazzCash': jc += order.billAmount; break;
+          }
+        }
         return DeliveryOrder(
           id: order.id,
           customerName: order.customerName,
@@ -205,7 +218,12 @@ class KhataBloc extends HydratedCubit<KhataState> {
       }
       return order;
     }).toList();
-    emit(KhataState(orders: updatedOrders, clients: state.clients, wallet: state.wallet));
+
+    emit(KhataState(
+      orders: updatedOrders,
+      clients: state.clients,
+      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+    ));
   }
 
   void transferFunds(String from, String to, double amount) {
@@ -242,7 +260,7 @@ class KhataBloc extends HydratedCubit<KhataState> {
 }
 
 // ==========================================
-// 3. MAIN APPLICATION SETUP
+// 3. MAIN APPLICATION & ORIGINAL LOGO THEME
 // ==========================================
 
 void main() async {
@@ -256,6 +274,9 @@ void main() async {
 class DeliveryKhataApp extends StatelessWidget {
   const DeliveryKhataApp({super.key});
 
+  static const Color primaryRed = Color(0xFFD32F2F); // لوگو کا بنیادی لال/سرخ رنگ
+  static const Color darkBackground = Color(0xFF212121); // ڈارک گرے
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
@@ -264,17 +285,23 @@ class DeliveryKhataApp extends StatelessWidget {
         title: 'Durshal Delivery Khata',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
-          primaryColor: const Color(0xFF1A252C), 
-          scaffoldBackgroundColor: const Color(0xFFF5F7F8),
+          primaryColor: primaryRed,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: primaryRed,
+            primary: primaryRed,
+            secondary: Colors.orangeAccent,
+          ),
+          scaffoldBackgroundColor: const Color(0xFFF4F5F7),
           appBarTheme: const AppBarTheme(
-            backgroundColor: Color(0xFF1A252C), 
+            backgroundColor: primaryRed, 
             foregroundColor: Colors.white,
-            elevation: 4,
+            elevation: 2,
+            centerTitle: true,
             titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           bottomNavigationBarTheme: const BottomNavigationBarThemeData(
             backgroundColor: Colors.white,
-            selectedItemColor: Color(0xFF1A252C),
+            selectedItemColor: primaryRed,
             unselectedItemColor: Colors.grey,
             selectedLabelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
             type: BottomNavigationBarType.fixed,
@@ -325,7 +352,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 }
 
 // ==========================================
-// 4. TAB SCREENS IMPLEMENTATIONS
+// 4. TAB SCREENS
 // ==========================================
 
 class DeliveriesScreen extends StatelessWidget {
@@ -351,7 +378,7 @@ class DeliveriesScreen extends StatelessWidget {
           final displayOrders = [...runningOrders, ...historicalOrders];
 
           if (displayOrders.isEmpty) {
-            return const Center(child: Text('No active records found. Tap + to add.', style: TextStyle(fontSize: 16)));
+            return const Center(child: Text('کوئی آرڈر موجود نہیں ہے۔ نیچے + پر کلک کریں۔', style: TextStyle(fontSize: 16)));
           }
 
           return ListView.builder(
@@ -363,7 +390,7 @@ class DeliveriesScreen extends StatelessWidget {
               return Card(
                 elevation: 2,
                 margin: const EdgeInsets.symmetric(vertical: 6),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   title: Text(order.customerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -378,12 +405,12 @@ class DeliveriesScreen extends StatelessWidget {
                   trailing: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     decoration: BoxDecoration(
-                      color: isPaid ? const Color(0xFFFFE0B2) : Colors.red.shade100,
+                      color: isPaid ? Colors.green.shade100 : Colors.red.shade100,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
                       isPaid ? 'Paid' : 'Udhar',
-                      style: TextStyle(color: isPaid ? Colors.orange.shade900 : Colors.red.shade900, fontWeight: FontWeight.bold),
+                      style: TextStyle(color: isPaid ? Colors.green.shade900 : Colors.red.shade900, fontWeight: FontWeight.bold),
                     ),
                   ),
                   onTap: () {
@@ -391,17 +418,17 @@ class DeliveriesScreen extends StatelessWidget {
                       showDialog(
                         context: context,
                         builder: (ctx) => AlertDialog(
-                          title: const Text('Change Status'),
-                          content: Text('Mark order for ${order.customerName} as paid?'),
+                          title: const Text('تکمیل آرڈر'),
+                          content: Text('کیا ${order.customerName} کا آرڈر وصول ہو گیا ہے؟'),
                           actions: [
-                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('No')),
+                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('نہیں')),
                             ElevatedButton(
                               onPressed: () {
                                 context.read<KhataBloc>().updateOrderStatus(order.id, 'Paid');
                                 Navigator.pop(ctx);
                               },
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A252C)),
-                              child: const Text('Mark Paid'),
+                              style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
+                              child: const Text('ہاں (Paid)', style: TextStyle(color: Colors.white)),
                             )
                           ],
                         ),
@@ -416,7 +443,7 @@ class DeliveriesScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openNewOrderBottomSheet(context),
-        backgroundColor: const Color(0xFF1A252C),
+        backgroundColor: DeliveryKhataApp.primaryRed,
         child: const Icon(Icons.add, color: Colors.white),
       ),
     );
@@ -440,7 +467,7 @@ class ClientsScreen extends StatelessWidget {
       body: BlocBuilder<KhataBloc, KhataState>(
         builder: (context, state) {
           if (state.clients.isEmpty) {
-            return const Center(child: Text('No active external loans recorded.', style: TextStyle(fontSize: 15)));
+            return const Center(child: Text('کوئی کلائنٹ موجود نہیں ہے۔', style: TextStyle(fontSize: 15)));
           }
           return ListView.builder(
             padding: const EdgeInsets.all(12),
@@ -450,7 +477,7 @@ class ClientsScreen extends StatelessWidget {
               return Card(
                 elevation: 1.5,
                 child: ListTile(
-                  leading: const CircleAvatar(backgroundColor: Color(0xFF1A252C), child: Icon(Icons.person, color: Colors.white)),
+                  leading: const CircleAvatar(backgroundColor: DeliveryKhataApp.primaryRed, child: Icon(Icons.person, color: Colors.white)),
                   title: Text(client.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text(client.phoneNumber),
                   trailing: const Icon(Icons.chevron_right),
@@ -462,7 +489,7 @@ class ClientsScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddCustomerModal(context),
-        backgroundColor: const Color(0xFF1A252C),
+        backgroundColor: DeliveryKhataApp.primaryRed,
         child: const Icon(Icons.person_add, color: Colors.white),
       ),
     );
@@ -494,7 +521,7 @@ class WalletScreen extends StatelessWidget {
               _buildWalletBalanceRow('Cash', w.cash, Colors.green),
               _buildWalletBalanceRow('Bank Account', w.bank, Colors.blue),
               _buildWalletBalanceRow('EasyPaisa', w.easyPaisa, Colors.lightGreen),
-              _buildWalletBalanceRow('JazzCash', w.jazzCash, Colors.redAccent),
+              _buildWalletBalanceRow('JazzCash', w.jazzCash, DeliveryKhataApp.primaryRed),
             ],
           );
         },
@@ -537,7 +564,7 @@ class HistoryScreen extends StatelessWidget {
         builder: (context, state) {
           final reversedOrders = List<DeliveryOrder>.from(state.orders);
           if (reversedOrders.isEmpty) {
-            return const Center(child: Text('History Records Screen is currently clean.'));
+            return const Center(child: Text('ہسٹری خالی ہے۔'));
           }
           return ListView.builder(
             padding: const EdgeInsets.all(12),
@@ -545,7 +572,7 @@ class HistoryScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = reversedOrders[index];
               return ListTile(
-                leading: Icon(item.status == 'Paid' ? Icons.check_circle : Icons.error, color: item.status == 'Paid' ? Colors.green : Colors.red),
+                leading: Icon(item.status == 'Paid' ? Icons.check_circle : Icons.error, color: item.status == 'Paid' ? Colors.green : DeliveryKhataApp.primaryRed),
                 title: Text(item.customerName),
                 subtitle: Text('Amount: Rs. ${item.billAmount} via ${item.paymentMode}'),
                 trailing: Text(DateFormat('dd/MM').format(item.dateTime)),
@@ -564,7 +591,7 @@ class SummaryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Summary and Charts Overview')),
+      appBar: AppBar(title: const Text('Summary Overview')),
       body: BlocBuilder<KhataBloc, KhataState>(
         builder: (context, state) {
           double totalVal = 0.0;
@@ -585,11 +612,11 @@ class SummaryScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Business Logistics Metrics', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                const Text('کاروباری کارکردگی', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 20),
-                _buildMetricCard('Total Earned Valuations', 'Rs. ${totalVal.toStringAsFixed(1)}', Colors.green, Icons.monetization_on),
-                _buildMetricCard('Pending Credit (Market Stuck)', 'Rs. ${pendingVal.toStringAsFixed(1)}', Colors.amber.shade800, Icons.hourglass_empty),
-                _buildMetricCard('Delivered Consignments', '$deliveredCount Orders', Colors.blue, Icons.local_shipping),
+                _buildMetricCard('کل وصولی (Earned)', 'Rs. ${totalVal.toStringAsFixed(1)}', Colors.green, Icons.monetization_on),
+                _buildMetricCard('کل ادھار (Pending)', 'Rs. ${pendingVal.toStringAsFixed(1)}', DeliveryKhataApp.primaryRed, Icons.hourglass_empty),
+                _buildMetricCard('ڈیلیور شدہ آرڈرز', '$deliveredCount Orders', Colors.blue, Icons.local_shipping),
               ],
             ),
           );
@@ -612,7 +639,7 @@ class SummaryScreen extends StatelessWidget {
 }
 
 // ==========================================
-// 5. COMPLEX WIDGET SHEETS & INTERACTION DIALOGS
+// 5. INTERACTION DIALOGS
 // ==========================================
 
 class NewOrderBottomSheet extends StatefulWidget {
@@ -640,9 +667,11 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
         });
       }
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Contact directory permissions rejected.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('فون بک کی اجازت نہیں ملی۔')),
+        );
+      }
     }
   }
 
@@ -651,7 +680,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
     if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
       cleanPhone = '92${cleanPhone.substring(1)}';
     }
-    final message = "Hello $name, your order breakdown from Durshal Delivery amounting to Rs. $amount has been registered. Thank you!";
+    final message = "السلام علیکم $name! درشال ڈیلیوری پر آپ کا آرڈر درج ہو چکا ہے۔ کل رقم: Rs. $amount. شکریہ!";
     final url = "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}";
     
     if (await canLaunchUrl(Uri.parse(url))) {
@@ -678,7 +707,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('New Order Record Form', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('نیا آرڈر شامل کریں', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
               ],
             ),
@@ -686,23 +715,23 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
             ElevatedButton.icon(
               onPressed: _selectFromPhoneBook,
               icon: const Icon(Icons.contact_phone),
-              label: const Text('Select From Phone Book'),
+              label: const Text('فون بک سے نمبر منتخب کریں'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal.shade700,
+                backgroundColor: DeliveryKhataApp.primaryRed,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
             const SizedBox(height: 16),
-            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Customer Name', border: OutlineInputBorder())),
+            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'گاہک کا نام', border: OutlineInputBorder())),
             const SizedBox(height: 12),
-            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'WhatsApp Number (e.g. 923xxxxxxxxx)', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
+            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'واٹس ایپ نمبر (مثلاً 923xxxxxxxxx)', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
             const SizedBox(height: 12),
-            TextField(controller: _amountController, decoration: const InputDecoration(labelText: 'Bill Amount (Rs.)', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+            TextField(controller: _amountController, decoration: const InputDecoration(labelText: 'بل کی رقم (Rs.)', border: OutlineInputBorder()), keyboardType: TextInputType.number),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               value: _selectedPaymentMode,
-              decoration: const InputDecoration(labelText: 'Payment Gateway', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'ادائیگی کا طریقہ', border: OutlineInputBorder()),
               items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash', 'Udhar'].map((mode) => DropdownMenuItem(value: mode, child: Text(mode))).toList(),
               onChanged: (val) => setState(() {
                 _selectedPaymentMode = val!;
@@ -737,10 +766,10 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A252C),
+                backgroundColor: DeliveryKhataApp.primaryRed,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              child: const Text('Save + Send WhatsApp Status', style: TextStyle(color: Colors.white, fontSize: 16)),
+              child: const Text('آرڈر محفوظ کریں + واٹس ایپ میسج', style: TextStyle(color: Colors.white, fontSize: 16)),
             ),
           ],
         ),
@@ -777,7 +806,7 @@ class _AddCustomerFormDialogState extends State<AddCustomerFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add New Customer Account'),
+      title: const Text('نیا کلائنٹ شامل کریں'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -785,18 +814,18 @@ class _AddCustomerFormDialogState extends State<AddCustomerFormDialog> {
             ElevatedButton.icon(
               onPressed: _importContactDirectly,
               icon: const Icon(Icons.import_contacts),
-              label: const Text('Import From Phone Book'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+              label: const Text('فون بک سے امپورٹ کریں'),
+              style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed, foregroundColor: Colors.white),
             ),
             const SizedBox(height: 16),
-            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Manual Form Name', border: OutlineInputBorder())),
+            TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'نام', border: OutlineInputBorder())),
             const SizedBox(height: 12),
-            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'Manual Phone Link', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
+            TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'فون نمبر', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
           ],
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('منسوخ')),
         ElevatedButton(
           onPressed: () {
             if (_nameController.text.isEmpty) return;
@@ -808,8 +837,8 @@ class _AddCustomerFormDialogState extends State<AddCustomerFormDialog> {
             context.read<KhataBloc>().addClient(client);
             Navigator.pop(context);
           },
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A252C)),
-          child: const Text('Save Account', style: TextStyle(color: Colors.white)),
+          style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
+          child: const Text('محفوظ کریں', style: TextStyle(color: Colors.white)),
         )
       ],
     );
@@ -831,27 +860,27 @@ class _TransferFundsDialogState extends State<TransferFundsDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Transfer Balances'),
+      title: const Text('رقم منتقل کریں'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           DropdownButtonFormField<String>(
             value: _fromWallet,
-            decoration: const InputDecoration(labelText: 'Source Wallet'),
+            decoration: const InputDecoration(labelText: 'کہاں سے (Source)'),
             items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
             onChanged: (val) => setState(() => _fromWallet = val!),
           ),
           DropdownButtonFormField<String>(
             value: _toWallet,
-            decoration: const InputDecoration(labelText: 'Destination Account'),
+            decoration: const InputDecoration(labelText: 'کہاں (Destination)'),
             items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
             onChanged: (val) => setState(() => _toWallet = val!),
           ),
-          TextField(controller: _amountController, decoration: const InputDecoration(labelText: 'Amount (Rs.)'), keyboardType: TextInputType.number),
+          TextField(controller: _amountController, decoration: const InputDecoration(labelText: 'رقم (Rs.)'), keyboardType: TextInputType.number),
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('منسوخ')),
         ElevatedButton(
           onPressed: () {
             final amt = double.tryParse(_amountController.text) ?? 0.0;
@@ -860,8 +889,8 @@ class _TransferFundsDialogState extends State<TransferFundsDialog> {
             }
             Navigator.pop(context);
           },
-          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A252C)),
-          child: const Text('Transfer'),
+          style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryRed),
+          child: const Text('ٹرانسفر کریں', style: TextStyle(color: Colors.white)),
         )
       ],
     );
