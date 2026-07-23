@@ -4,6 +4,7 @@ import 'package:hydrated_bloc/hydrated_bloc.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 
 // ==========================================
 // 1. MODELS & DATA STRUCTURES
@@ -180,10 +181,10 @@ class Customer {
 
   factory Customer.fromMap(Map<String, dynamic> map) {
     return Customer(
-      id: map['id'] ?? '',
-      name: map['name'] ?? '',
-      phoneNumber: map['phoneNumber'] ?? '',
-      address: map['address'] ?? '',
+      id: map['id']?.toString() ?? '',
+      name: map['name']?.toString() ?? '',
+      phoneNumber: map['phoneNumber']?.toString() ?? '',
+      address: map['address']?.toString() ?? '',
     );
   }
 }
@@ -278,9 +279,9 @@ class KhataState {
     return KhataState(
       pin: map['pin'],
       isAuthenticated: false,
-      orders: (map['orders'] as List? ?? []).map((e) => DeliveryOrder.fromMap(e)).toList(),
-      customers: (map['customers'] as List? ?? []).map((e) => Customer.fromMap(e)).toList(),
-      wallet: map['wallet'] != null ? WalletStateData.fromMap(map['wallet']) : WalletStateData(),
+      orders: (map['orders'] as List? ?? []).map((e) => DeliveryOrder.fromMap(Map<String, dynamic>.from(e))).toList(),
+      customers: (map['customers'] as List? ?? []).map((e) => Customer.fromMap(Map<String, dynamic>.from(e))).toList(),
+      wallet: map['wallet'] != null ? WalletStateData.fromMap(Map<String, dynamic>.from(map['wallet'])) : WalletStateData(),
     );
   }
 }
@@ -1041,6 +1042,37 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
     _addressController = TextEditingController(text: widget.customerToEdit?.address ?? '');
   }
 
+  Future<void> _pickFromContacts() async {
+    try {
+      if (await FlutterContacts.requestPermission()) {
+        final contact = await FlutterContacts.openExternalPick();
+        if (contact != null) {
+          final fullContact = await FlutterContacts.getContact(contact.id);
+          if (fullContact != null) {
+            setState(() {
+              _nameController.text = fullContact.displayName;
+              if (fullContact.phones.isNotEmpty) {
+                _phoneController.text = fullContact.phones.first.number;
+              }
+            });
+          }
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Contacts permission is required to pick a contact.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking contact: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.customerToEdit != null;
@@ -1051,6 +1083,18 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (!isEdit) ...[
+              OutlinedButton.icon(
+                onPressed: _pickFromContacts,
+                icon: const Icon(Icons.contacts, color: DeliveryKhataApp.accentOrange),
+                label: const Text('Pick from Phone Contacts', style: TextStyle(color: DeliveryKhataApp.accentOrange, fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: DeliveryKhataApp.accentOrange),
+                  minimumSize: const Size.fromHeight(45),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Customer Name', border: OutlineInputBorder())),
             const SizedBox(height: 12),
             TextField(controller: _phoneController, decoration: const InputDecoration(labelText: 'WhatsApp Phone Number', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
