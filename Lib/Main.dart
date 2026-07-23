@@ -342,6 +342,42 @@ class KhataBloc extends HydratedCubit<KhataState> {
     ));
   }
 
+  void lendMoneyDirectly(Customer customer, double amount, String sourceAccount) {
+    double c = state.wallet.cash;
+    double b = state.wallet.bank;
+    double ep = state.wallet.easyPaisa;
+    double jc = state.wallet.jazzCash;
+
+    switch (sourceAccount) {
+      case 'Cash': c -= amount; break;
+      case 'Bank': b -= amount; break;
+      case 'EasyPaisa': ep -= amount; break;
+      case 'JazzCash': jc -= amount; break;
+    }
+
+    final udharOrder = DeliveryOrder(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      customerName: customer.name,
+      phoneNumber: customer.phoneNumber,
+      customerAddress: customer.address,
+      items: [OrderItem(name: 'Direct Cash Lending ($sourceAccount)', quantity: 1, price: amount)],
+      deliveryCharges: 0.0,
+      totalAmount: amount,
+      paidAmount: 0.0,
+      remainingAmount: amount,
+      paymentMode: 'Udhar ($sourceAccount)',
+      status: 'Udhar',
+      dateTime: DateTime.now(),
+    );
+
+    final updatedOrders = List<DeliveryOrder>.from(state.orders)..insert(0, udharOrder);
+
+    emit(state.copyWith(
+      orders: updatedOrders,
+      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+    ));
+  }
+
   void settleUdharOrder(String orderId, double paymentReceived, String destinationAccount) {
     double c = state.wallet.cash;
     double b = state.wallet.bank;
@@ -436,7 +472,7 @@ class KhataBloc extends HydratedCubit<KhataState> {
 }
 
 // ==========================================
-// 3. MAIN APP & THEME CONFIGURATION (RELEASE 8 COLORS)
+// 3. MAIN APP & THEME CONFIGURATION
 // ==========================================
 
 void main() async {
@@ -450,7 +486,6 @@ void main() async {
 class DeliveryKhataApp extends StatelessWidget {
   const DeliveryKhataApp({super.key});
 
-  // Release 8 Theme Color Palette
   static const Color primaryGray = Color(0xFF3A3F44);
   static const Color accentOrange = Color(0xFFFF7619);
 
@@ -489,6 +524,34 @@ class DeliveryKhataApp extends StatelessWidget {
         home: const AuthWrapper(),
       ),
     );
+  }
+}
+
+// ==========================================
+// UTILITY: WHATSAPP DIRECT SENDER
+// ==========================================
+
+void sendWhatsAppInvoice({
+  required String phone,
+  required String message,
+}) async {
+  String cleanPhone = phone.replaceAll(RegExp(r'\+|\s+|-'), '');
+  if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
+    cleanPhone = '92${cleanPhone.substring(1)}';
+  }
+
+  final encodedMsg = Uri.encodeComponent(message);
+  final whatsappUri = Uri.parse("whatsapp://send?phone=$cleanPhone&text=$encodedMsg");
+  final webUri = Uri.parse("https://wa.me/$cleanPhone?text=$encodedMsg");
+
+  try {
+    if (await canLaunchUrl(whatsappUri)) {
+      await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+    } else {
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    }
+  } catch (_) {
+    await launchUrl(webUri, mode: LaunchMode.externalApplication);
   }
 }
 
@@ -856,7 +919,7 @@ class _SettleUdharDialogState extends State<SettleUdharDialog> {
 }
 
 // ==========================================
-// 7. CUSTOMERS TAB (WITH THREE-DOTS MENU)
+// 7. CUSTOMERS TAB
 // ==========================================
 
 class CustomersScreen extends StatelessWidget {
@@ -1025,7 +1088,7 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
 }
 
 // ==========================================
-// 8. WALLET TAB (WITH LENDING / UDHAR FROM RELEASE 8)
+// 8. WALLET TAB (WITH DIRECT LENDING DIALOG)
 // ==========================================
 
 class WalletScreen extends StatelessWidget {
@@ -1037,6 +1100,10 @@ class WalletScreen extends StatelessWidget {
 
   void _openInjectMoneyDialog(BuildContext context) {
     showDialog(context: context, builder: (context) => const InjectMoneyDialog());
+  }
+
+  void _openDirectLendingDialog(BuildContext context) {
+    showDialog(context: context, builder: (context) => const DirectLendingDialog());
   }
 
   @override
@@ -1061,7 +1128,6 @@ class WalletScreen extends StatelessWidget {
         builder: (context, state) {
           final w = state.wallet;
 
-          // Calculate total outstanding udhar for Lending card summary
           double totalLending = 0.0;
           for (var o in state.orders) {
             totalLending += o.remainingAmount;
@@ -1076,7 +1142,6 @@ class WalletScreen extends StatelessWidget {
               _buildWalletCard('JazzCash Account', w.jazzCash, DeliveryKhataApp.accentOrange),
               const SizedBox(height: 8),
 
-              // Integrated Lending / Udhar Account Option from Release 8
               Card(
                 elevation: 2,
                 margin: const EdgeInsets.symmetric(vertical: 8),
@@ -1093,13 +1158,8 @@ class WalletScreen extends StatelessWidget {
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   subtitle: Text('Total Market Udhar: Rs. ${totalLending.toStringAsFixed(1)}'),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                  onTap: () {
-                    // Quick navigation or filter to view pending udhar orders
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Total Market Lending Outstanding: Rs. ${totalLending.toStringAsFixed(1)}')),
-                    );
-                  },
+                  trailing: const Icon(Icons.add_circle_outline, color: DeliveryKhataApp.accentOrange),
+                  onTap: () => _openDirectLendingDialog(context),
                 ),
               ),
             ],
@@ -1129,6 +1189,94 @@ class WalletScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// DIRECT LEND MONEY DIALOG (NEW FEATURE)
+class DirectLendingDialog extends StatefulWidget {
+  const DirectLendingDialog({super.key});
+
+  @override
+  State<DirectLendingDialog> createState() => _DirectLendingDialogState();
+}
+
+class _DirectLendingDialogState extends State<DirectLendingDialog> {
+  Customer? _selectedCustomer;
+  String _selectedSourceAccount = 'Cash';
+  final _amountController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    final customersList = context.watch<KhataBloc>().state.customers;
+
+    return AlertDialog(
+      title: const Text('Lend Money / Give Udhar'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<Customer>(
+              value: _selectedCustomer,
+              decoration: const InputDecoration(labelText: 'Select Customer', border: OutlineInputBorder()),
+              items: customersList.map((c) {
+                return DropdownMenuItem<Customer>(
+                  value: c,
+                  child: Text('${c.name} (${c.phoneNumber})'),
+                );
+              }).toList(),
+              onChanged: (val) => setState(() => _selectedCustomer = val),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedSourceAccount,
+              decoration: const InputDecoration(labelText: 'Select Account Source', border: OutlineInputBorder()),
+              items: ['Cash', 'Bank', 'EasyPaisa', 'JazzCash'].map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
+              onChanged: (val) => setState(() => _selectedSourceAccount = val!),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Amount (Rs.)', border: OutlineInputBorder()),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            if (_selectedCustomer == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Please select a customer.')),
+              );
+              return;
+            }
+
+            final amt = double.tryParse(_amountController.text) ?? 0.0;
+            if (amt <= 0) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Please enter a valid amount.')),
+              );
+              return;
+            }
+
+            context.read<KhataBloc>().lendMoneyDirectly(_selectedCustomer!, amt, _selectedSourceAccount);
+            Navigator.pop(context);
+
+            if (_selectedCustomer!.phoneNumber.isNotEmpty) {
+              final message = "🚚 *DURSHAL DELIVERY KHATA*\n\n"
+                  "Hello ${_selectedCustomer!.name},\n"
+                  "An amount of *Rs. ${amt.toStringAsFixed(1)}* has been credited to your Udhar account via *$_selectedSourceAccount*.\n\n"
+                  "Thank you!";
+              sendWhatsAppInvoice(phone: _selectedCustomer!.phoneNumber, message: message);
+            }
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryGray),
+          child: const Text('Lend Money & Send WhatsApp', style: TextStyle(color: Colors.white)),
+        ),
+      ],
     );
   }
 }
@@ -1244,7 +1392,7 @@ class _TransferFundsDialogState extends State<TransferFundsDialog> {
 }
 
 // ==========================================
-// 9. HISTORY TAB (FILTER BY TODAY, DATE & CUSTOMER)
+// 9. HISTORY TAB
 // ==========================================
 
 class HistoryScreen extends StatefulWidget {
@@ -1255,7 +1403,7 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  String _filterType = 'Today'; // Today, All, Specific Date
+  String _filterType = 'Today';
   DateTime? _selectedDate;
   String? _selectedCustomerFilter;
 
@@ -1267,7 +1415,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
         builder: (context, state) {
           List<DeliveryOrder> filteredOrders = List.from(state.orders);
 
-          // Apply Date / Today Filter
           if (_filterType == 'Today') {
             final now = DateTime.now();
             filteredOrders = filteredOrders.where((o) =>
@@ -1281,7 +1428,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 o.dateTime.day == _selectedDate!.day).toList();
           }
 
-          // Apply Customer Filter
           if (_selectedCustomerFilter != null && _selectedCustomerFilter != 'All Customers') {
             filteredOrders = filteredOrders.where((o) => o.customerName == _selectedCustomerFilter).toList();
           }
@@ -1376,7 +1522,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 }
 
 // ==========================================
-// 10. SUMMARY TAB (WITH FILTERS)
+// 10. SUMMARY TAB
 // ==========================================
 
 class SummaryScreen extends StatefulWidget {
@@ -1387,7 +1533,7 @@ class SummaryScreen extends StatefulWidget {
 }
 
 class _SummaryScreenState extends State<SummaryScreen> {
-  String _filterType = 'All Time'; // All Time, Today, Specific Date
+  String _filterType = 'All Time';
   DateTime? _selectedDate;
   String? _selectedCustomerFilter;
 
@@ -1508,7 +1654,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
 }
 
 // ==========================================
-// 11. NEW ORDER BOTTOM SHEET (SINGLE ITEM ADD & DIRECT WHATSAPP)
+// 11. NEW ORDER BOTTOM SHEET (WITH DETAILED INVOICE)
 // ==========================================
 
 class NewOrderBottomSheet extends StatefulWidget {
@@ -1548,27 +1694,41 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
     return _itemsSubtotal + dc;
   }
 
-  void _triggerWhatsAppMessage(String name, String phone, double totalAmount) async {
-    String cleanPhone = phone.replaceAll(RegExp(r'\+|\s+|-'), '');
-    if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
-      cleanPhone = '92${cleanPhone.substring(1)}';
+  String _generateDetailedWhatsAppMessage({
+    required String customerName,
+    required List<OrderItem> validItems,
+    required double deliveryCharges,
+    required double grandTotal,
+    required double paidAmount,
+    required double remainingAmount,
+    required String paymentMode,
+  }) {
+    StringBuffer buffer = StringBuffer();
+    buffer.writeln("🚚 *DURSHAL DELIVERY ORDER RECEIPT*");
+    buffer.writeln("----------------------------------");
+    buffer.writeln("👤 *Customer:* $customerName");
+    buffer.writeln("📅 *Date:* ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}");
+    buffer.writeln("----------------------------------");
+    buffer.writeln("📋 *ITEMS ORDERED:*");
+
+    for (int i = 0; i < validItems.length; i++) {
+      final item = validItems[i];
+      final itemTotal = item.quantity * item.price;
+      buffer.writeln("${i + 1}. ${item.name} x${item.quantity} = Rs. ${itemTotal.toStringAsFixed(1)}");
     }
 
-    final message = "Hello $name, your order from Durshal Delivery has been placed. Grand Total: Rs. ${totalAmount.toStringAsFixed(1)}. Thank you!";
-    final encodedMsg = Uri.encodeComponent(message);
+    buffer.writeln("----------------------------------");
+    buffer.writeln("📦 *Subtotal:* Rs. ${_itemsSubtotal.toStringAsFixed(1)}");
+    buffer.writeln("🛵 *Delivery Charges:* Rs. ${deliveryCharges.toStringAsFixed(1)}");
+    buffer.writeln("💰 *Grand Total:* Rs. ${grandTotal.toStringAsFixed(1)}");
+    buffer.writeln("----------------------------------");
+    buffer.writeln("💳 *Payment Mode:* $paymentMode");
+    buffer.writeln("✅ *Paid Amount:* Rs. ${paidAmount.toStringAsFixed(1)}");
+    buffer.writeln("📌 *Remaining Balance:* Rs. ${remainingAmount.toStringAsFixed(1)}");
+    buffer.writeln("----------------------------------");
+    buffer.writeln("Thank you for using Durshal Delivery!");
 
-    final whatsappUri = Uri.parse("whatsapp://send?phone=$cleanPhone&text=$encodedMsg");
-    final webUri = Uri.parse("https://wa.me/$cleanPhone?text=$encodedMsg");
-
-    try {
-      if (await canLaunchUrl(whatsappUri)) {
-        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
-      } else if (await canLaunchUrl(webUri)) {
-        await launchUrl(webUri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {
-      await launchUrl(webUri, mode: LaunchMode.externalApplication);
-    }
+    return buffer.toString();
   }
 
   @override
@@ -1723,12 +1883,14 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                 final initialRemaining = isUdhar ? total : 0.0;
                 final initialStatus = isUdhar ? 'Udhar' : 'Paid';
 
+                final validItems = _items.where((i) => i.name.isNotEmpty).toList();
+
                 final order = DeliveryOrder(
                   id: DateTime.now().millisecondsSinceEpoch.toString(),
                   customerName: custName,
                   phoneNumber: phone,
                   customerAddress: address,
-                  items: _items.where((i) => i.name.isNotEmpty).toList(),
+                  items: validItems,
                   deliveryCharges: dc,
                   totalAmount: total,
                   paidAmount: initialPaid,
@@ -1742,7 +1904,17 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                 Navigator.pop(context);
 
                 if (phone.isNotEmpty) {
-                  _triggerWhatsAppMessage(custName, phone, total);
+                  final detailedMessage = _generateDetailedWhatsAppMessage(
+                    customerName: custName,
+                    validItems: validItems,
+                    deliveryCharges: dc,
+                    grandTotal: total,
+                    paidAmount: initialPaid,
+                    remainingAmount: initialRemaining,
+                    paymentMode: _selectedPaymentMode,
+                  );
+
+                  sendWhatsAppInvoice(phone: phone, message: detailedMessage);
                 }
               },
               style: ElevatedButton.styleFrom(
