@@ -8,15 +8,14 @@
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
         
-        <!-- Added: Contact picker queries for Android 11+ -->
+        <!-- Contact picker queries for Android 11+ -->
         <intent>
             <action android:name="android.intent.action.PICK" />
             <data android:mimeType="vnd.android.cursor.dir/contact" />
         </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="content" />
-            <host android:name="com.android.contacts" />
+            <data android:scheme="content" android:host="com.android.contacts" />
         </intent>
     </queries>
 
