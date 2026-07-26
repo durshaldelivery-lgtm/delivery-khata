@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
@@ -5,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:screenshot/screenshot.dart';
+import 'package:share_plus/share_plus.dart';
 
 // ==========================================
 // 1. MODELS & DATA STRUCTURES
@@ -529,30 +532,45 @@ class DeliveryKhataApp extends StatelessWidget {
 }
 
 // ==========================================
-// UTILITY: WHATSAPP DIRECT SENDER
+// UTILITY: WHATSAPP DIRECT SENDER (IMAGE INVOICE)
 // ==========================================
 
-void sendWhatsAppInvoice({
+Future<void> sendWhatsAppInvoiceImage({
+  required ScreenshotController screenshotController,
+  required Widget invoiceWidget,
   required String phone,
-  required String message,
+  required String textCaption,
 }) async {
-  String cleanPhone = phone.replaceAll(RegExp(r'\+|\s+|-'), '');
-  if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
-    cleanPhone = '92${cleanPhone.substring(1)}';
-  }
-
-  final encodedMsg = Uri.encodeComponent(message);
-  final whatsappUri = Uri.parse("whatsapp://send?phone=$cleanPhone&text=$encodedMsg");
-  final webUri = Uri.parse("https://wa.me/$cleanPhone?text=$encodedMsg");
-
   try {
-    if (await canLaunchUrl(whatsappUri)) {
-      await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
-    } else {
-      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    // Render and capture image from widget invisible to user
+    final imageBytes = await screenshotController.captureFromWidget(
+      Material(
+        child: Container(
+          width: 380,
+          padding: const EdgeInsets.all(16),
+          color: Colors.white,
+          child: invoiceWidget,
+        ),
+      ),
+      delay: const Duration(milliseconds: 100),
+    );
+
+    final tempDir = await getTemporaryDirectory();
+    final file = await File('${tempDir.path}/invoice_${DateTime.now().millisecondsSinceEpoch}.png').create();
+    await file.writeAsBytes(imageBytes);
+
+    String cleanPhone = phone.replaceAll(RegExp(r'\+|\s+|-'), '');
+    if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
+      cleanPhone = '92${cleanPhone.substring(1)}';
     }
-  } catch (_) {
-    await launchUrl(webUri, mode: LaunchMode.externalApplication);
+
+    // Share invoice picture directly to WhatsApp
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text: textCaption,
+    );
+  } catch (e) {
+    debugPrint("Error sharing invoice image: $e");
   }
 }
 
@@ -1264,7 +1282,7 @@ class WalletScreen extends StatelessWidget {
   }
 }
 
-// DIRECT LEND MONEY DIALOG (NEW FEATURE)
+// DIRECT LEND MONEY DIALOG
 class DirectLendingDialog extends StatefulWidget {
   const DirectLendingDialog({super.key});
 
@@ -1276,6 +1294,7 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
   Customer? _selectedCustomer;
   String _selectedSourceAccount = 'Cash';
   final _amountController = TextEditingController();
+  final ScreenshotController _screenshotController = ScreenshotController();
 
   @override
   void dispose() {
@@ -1323,7 +1342,7 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         ElevatedButton(
-          onPressed: () {
+          onPressed: () async {
             if (_selectedCustomer == null) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Please select a customer.')),
@@ -1343,15 +1362,50 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
             Navigator.pop(context);
 
             if (_selectedCustomer!.phoneNumber.isNotEmpty) {
-              final message = "🚚 *DURSHAL DELIVERY KHATA*\n\n"
-                  "Hello ${_selectedCustomer!.name},\n"
-                  "An amount of *Rs. ${amt.toStringAsFixed(1)}* has been credited to your Udhar account via *$_selectedSourceAccount*.\n\n"
-                  "Thank you!";
-              sendWhatsAppInvoice(phone: _selectedCustomer!.phoneNumber, message: message);
+              final invoiceWidget = Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  border: Border.all(color: DeliveryKhataApp.primaryGray, width: 2),
+                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.white,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text("🚚 DURSHAL DELIVERY", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: DeliveryKhataApp.primaryGray)),
+                    const SizedBox(height: 4),
+                    const Text("Lending Account Receipt", style: TextStyle(fontSize: 14, color: Colors.grey)),
+                    const Divider(thickness: 1.5, height: 20),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Customer:"), Text(_selectedCustomer!.name, style: const TextStyle(fontWeight: FontWeight.bold))]),
+                    const SizedBox(height: 6),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Date:"), Text(DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()))]),
+                    const SizedBox(height: 6),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Account Source:"), Text(_selectedSourceAccount)]),
+                    const Divider(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Credited Amount:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text("Rs. ${amt.toStringAsFixed(1)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: DeliveryKhataApp.accentOrange)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text("Thank you for using Durshal Delivery!", style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+                  ],
+                ),
+              );
+
+              final textCaption = "🚚 Durshal Delivery - Cash Udhar Receipt for ${_selectedCustomer!.name}";
+              await sendWhatsAppInvoiceImage(
+                screenshotController: _screenshotController,
+                invoiceWidget: invoiceWidget,
+                phone: _selectedCustomer!.phoneNumber,
+                textCaption: textCaption,
+              );
             }
           },
           style: ElevatedButton.styleFrom(backgroundColor: DeliveryKhataApp.primaryGray),
-          child: const Text('Lend Money & Send WhatsApp', style: TextStyle(color: Colors.white)),
+          child: const Text('Lend Money & Send WhatsApp Bill', style: TextStyle(color: Colors.white)),
         ),
       ],
     );
@@ -1745,7 +1799,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
 }
 
 // ==========================================
-// 11. NEW ORDER BOTTOM SHEET (WITH DETAILED INVOICE)
+// 11. NEW ORDER BOTTOM SHEET (WITH PICTURE INVOICE)
 // ==========================================
 
 class NewOrderBottomSheet extends StatefulWidget {
@@ -1759,6 +1813,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
   Customer? _selectedCustomer;
   final _deliveryChargesController = TextEditingController(text: '0');
   String _selectedPaymentMode = 'Cash';
+  final ScreenshotController _screenshotController = ScreenshotController();
 
   final List<OrderItem> _items = [
     OrderItem(),
@@ -1791,7 +1846,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
     return _itemsSubtotal + dc;
   }
 
-  String _generateDetailedWhatsAppMessage({
+  Widget _buildInvoiceImageWidget({
     required String customerName,
     required List<OrderItem> validItems,
     required double deliveryCharges,
@@ -1800,32 +1855,70 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
     required double remainingAmount,
     required String paymentMode,
   }) {
-    StringBuffer buffer = StringBuffer();
-    buffer.writeln("🚚 *DURSHAL DELIVERY ORDER RECEIPT*");
-    buffer.writeln("----------------------------------");
-    buffer.writeln("👤 *Customer:* $customerName");
-    buffer.writeln("📅 *Date:* ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}");
-    buffer.writeln("----------------------------------");
-    buffer.writeln("📋 *ITEMS ORDERED:*");
-
-    for (int i = 0; i < validItems.length; i++) {
-      final item = validItems[i];
-      final itemTotal = item.quantity * item.price;
-      buffer.writeln("${i + 1}. ${item.name} x${item.quantity} = Rs. ${itemTotal.toStringAsFixed(1)}");
-    }
-
-    buffer.writeln("----------------------------------");
-    buffer.writeln("📦 *Subtotal:* Rs. ${_itemsSubtotal.toStringAsFixed(1)}");
-    buffer.writeln("🛵 *Delivery Charges:* Rs. ${deliveryCharges.toStringAsFixed(1)}");
-    buffer.writeln("💰 *Grand Total:* Rs. ${grandTotal.toStringAsFixed(1)}");
-    buffer.writeln("----------------------------------");
-    buffer.writeln("💳 *Payment Mode:* $paymentMode");
-    buffer.writeln("✅ *Paid Amount:* Rs. ${paidAmount.toStringAsFixed(1)}");
-    buffer.writeln("📌 *Remaining Balance:* Rs. ${remainingAmount.toStringAsFixed(1)}");
-    buffer.writeln("----------------------------------");
-    buffer.writeln("Thank you for using Durshal Delivery!");
-
-    return buffer.toString();
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: DeliveryKhataApp.primaryGray, width: 2),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Column(
+              children: [
+                const Text("🚚 DURSHAL DELIVERY", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: DeliveryKhataApp.primaryGray)),
+                const SizedBox(height: 4),
+                const Text("Official Order Invoice / Receipt", style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+          ),
+          const Divider(thickness: 1.5, height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("Customer: $customerName", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              Text(DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text("ITEMS ORDERED:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: DeliveryKhataApp.primaryGray)),
+          const SizedBox(height: 6),
+          ...validItems.map((item) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text("${item.name} x${item.quantity}", style: const TextStyle(fontSize: 13)),
+                Text("Rs. ${(item.quantity * item.price).toStringAsFixed(1)}", style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              ],
+            ),
+          )),
+          const Divider(height: 20),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Subtotal:"), Text("Rs. ${_itemsSubtotal.toStringAsFixed(1)}")]),
+          const SizedBox(height: 4),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Delivery Charges:"), Text("Rs. ${deliveryCharges.toStringAsFixed(1)}")]),
+          const Divider(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Grand Total:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              Text("Rs. ${grandTotal.toStringAsFixed(1)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: DeliveryKhataApp.primaryGray)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Payment Mode:"), Text(paymentMode, style: const TextStyle(fontWeight: FontWeight.bold))]),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Paid Amount:"), Text("Rs. ${paidAmount.toStringAsFixed(1)}", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))]),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Remaining Balance:"), Text("Rs. ${remainingAmount.toStringAsFixed(1)}", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))]),
+          const Divider(thickness: 1.5, height: 24),
+          const Center(
+            child: Text("Thank you for using Durshal Delivery!", style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.black54)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1961,7 +2054,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
 
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 if (_selectedCustomer == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Please select a registered customer first.')),
@@ -2001,7 +2094,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                 Navigator.pop(context);
 
                 if (phone.isNotEmpty) {
-                  final detailedMessage = _generateDetailedWhatsAppMessage(
+                  final invoiceWidget = _buildInvoiceImageWidget(
                     customerName: custName,
                     validItems: validItems,
                     deliveryCharges: dc,
@@ -2011,14 +2104,21 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                     paymentMode: _selectedPaymentMode,
                   );
 
-                  sendWhatsAppInvoice(phone: phone, message: detailedMessage);
+                  final caption = "🚚 *Durshal Delivery Invoice*\nCustomer: $custName\nTotal Bill: Rs. ${total.toStringAsFixed(1)}";
+
+                  await sendWhatsAppInvoiceImage(
+                    screenshotController: _screenshotController,
+                    invoiceWidget: invoiceWidget,
+                    phone: phone,
+                    textCaption: caption,
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: DeliveryKhataApp.primaryGray,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              child: const Text('Place Order + Send WhatsApp Message', style: TextStyle(color: Colors.white, fontSize: 16)),
+              child: const Text('Place Order + Share WhatsApp Picture Bill', style: TextStyle(color: Colors.white, fontSize: 16)),
             ),
           ],
         ),
