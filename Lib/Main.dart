@@ -591,6 +591,13 @@ class _CreatePinScreenState extends State<CreatePinScreen> {
   final _confirmPinController = TextEditingController();
 
   @override
+  void dispose() {
+    _pinController.dispose();
+    _confirmPinController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Security Setup')),
@@ -655,6 +662,12 @@ class EnterPinScreen extends StatefulWidget {
 
 class _EnterPinScreenState extends State<EnterPinScreen> {
   final _pinController = TextEditingController();
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -875,6 +888,12 @@ class _SettleUdharDialogState extends State<SettleUdharDialog> {
   }
 
   @override
+  void dispose() {
+    _paymentController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('Settle Udhar: ${widget.order.customerName}'),
@@ -1042,12 +1061,22 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
     _addressController = TextEditingController(text: widget.customerToEdit?.address ?? '');
   }
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
   Future<void> _pickFromContacts() async {
     try {
       if (await FlutterContacts.requestPermission()) {
         final contact = await FlutterContacts.openExternalPick();
+        if (!mounted) return;
         if (contact != null) {
           final fullContact = await FlutterContacts.getContact(contact.id);
+          if (!mounted) return;
           if (fullContact != null) {
             setState(() {
               _nameController.text = fullContact.displayName;
@@ -1058,18 +1087,16 @@ class _CustomerFormDialogState extends State<CustomerFormDialog> {
           }
         }
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Contacts permission is required to pick a contact.')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking contact: $e')),
+          const SnackBar(content: Text('Contacts permission is required to pick a contact.')),
         );
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking contact: $e')),
+      );
     }
   }
 
@@ -1251,6 +1278,12 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
   final _amountController = TextEditingController();
 
   @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final customersList = context.watch<KhataBloc>().state.customers;
 
@@ -1337,6 +1370,12 @@ class _InjectMoneyDialogState extends State<InjectMoneyDialog> {
   final _amountController = TextEditingController();
 
   @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Deposit / Withdraw Money'),
@@ -1389,6 +1428,12 @@ class _TransferFundsDialogState extends State<TransferFundsDialog> {
   String _fromWallet = 'Cash';
   String _toWallet = 'Bank';
   final _amountController = TextEditingController();
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1500,6 +1545,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   firstDate: DateTime(2020),
                                   lastDate: DateTime(2030),
                                 );
+                                if (!mounted) return;
                                 if (picked != null) {
                                   setState(() {
                                     _filterType = 'Specific Date';
@@ -1640,6 +1686,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
                               firstDate: DateTime(2020),
                               lastDate: DateTime(2030),
                             );
+                            if (!mounted) return;
                             if (picked != null) {
                               setState(() {
                                 _filterType = 'Specific Date';
@@ -1718,6 +1765,12 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
     OrderItem(),
     OrderItem(),
   ];
+
+  @override
+  void dispose() {
+    _deliveryChargesController.dispose();
+    super.dispose();
+  }
 
   void _addSingleItem() {
     setState(() {
