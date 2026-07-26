@@ -7,7 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:screenshot/screenshot.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 
 // ==========================================
 // 1. MODELS & DATA STRUCTURES
@@ -532,17 +532,18 @@ class DeliveryKhataApp extends StatelessWidget {
 }
 
 // ==========================================
-// UTILITY: WHATSAPP DIRECT SENDER (IMAGE INVOICE)
+// UTILITY: DIRECT WHATSAPP CHAT + INVOICE SAVER
 // ==========================================
 
-Future<void> sendWhatsAppInvoiceImage({
+Future<void> sendDirectWhatsAppInvoice({
   required ScreenshotController screenshotController,
   required Widget invoiceWidget,
   required String phone,
   required String textCaption,
+  required BuildContext context,
 }) async {
   try {
-    // Render and capture image from widget invisible to user
+    // 1. Capture image from widget
     final imageBytes = await screenshotController.captureFromWidget(
       Material(
         child: Container(
@@ -555,22 +556,43 @@ Future<void> sendWhatsAppInvoiceImage({
       delay: const Duration(milliseconds: 100),
     );
 
-    final tempDir = await getTemporaryDirectory();
-    final file = await File('${tempDir.path}/invoice_${DateTime.now().millisecondsSinceEpoch}.png').create();
-    await file.writeAsBytes(imageBytes);
+    // 2. Save image to Gallery so it appears in WhatsApp Recent attachments
+    await ImageGallerySaver.saveImage(
+      imageBytes,
+      quality: 100,
+      name: "Invoice_${DateTime.now().millisecondsSinceEpoch}",
+    );
 
+    // 3. Clean up phone number
     String cleanPhone = phone.replaceAll(RegExp(r'\+|\s+|-'), '');
     if (!cleanPhone.startsWith('92') && cleanPhone.startsWith('0')) {
       cleanPhone = '92${cleanPhone.substring(1)}';
     }
 
-    // Share invoice picture directly to WhatsApp
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      text: textCaption,
-    );
+    // 4. Directly open target customer's WhatsApp chat
+    final encodedText = Uri.encodeComponent(textCaption);
+    final whatsappUrl = Uri.parse("https://wa.me/$cleanPhone?text=$encodedText");
+
+    if (await canLaunchUrl(whatsappUrl)) {
+      await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('بل گیلری میں سیو ہو گیا ہے۔ چیٹ میں Attachment (+) سے پہلی تصویر سلیکٹ کر کے بھیج دیں۔'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('WhatsApp نہیں کھل سکا۔ نمبر درست ہے؟')),
+        );
+      }
+    }
   } catch (e) {
-    debugPrint("Error sharing invoice image: $e");
+    debugPrint("Error opening WhatsApp direct chat: $e");
   }
 }
 
@@ -1395,12 +1417,14 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
                 ),
               );
 
-              final textCaption = "🚚 Durshal Delivery - Cash Udhar Receipt for ${_selectedCustomer!.name}";
-              await sendWhatsAppInvoiceImage(
+              final textCaption = "🚚 Durshal Delivery - Cash Udhar Receipt for ${_selectedCustomer!.name}\nAmount: Rs. ${amt.toStringAsFixed(1)}";
+              
+              await sendDirectWhatsAppInvoice(
                 screenshotController: _screenshotController,
                 invoiceWidget: invoiceWidget,
                 phone: _selectedCustomer!.phoneNumber,
                 textCaption: textCaption,
+                context: context,
               );
             }
           },
@@ -1799,7 +1823,7 @@ class _SummaryScreenState extends State<SummaryScreen> {
 }
 
 // ==========================================
-// 11. NEW ORDER BOTTOM SHEET (WITH PICTURE INVOICE)
+// 11. NEW ORDER BOTTOM SHEET (WITH DIRECT WHATSAPP)
 // ==========================================
 
 class NewOrderBottomSheet extends StatefulWidget {
@@ -2106,11 +2130,12 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
 
                   final caption = "🚚 *Durshal Delivery Invoice*\nCustomer: $custName\nTotal Bill: Rs. ${total.toStringAsFixed(1)}";
 
-                  await sendWhatsAppInvoiceImage(
+                  await sendDirectWhatsAppInvoice(
                     screenshotController: _screenshotController,
                     invoiceWidget: invoiceWidget,
                     phone: phone,
                     textCaption: caption,
+                    context: context,
                   );
                 }
               },
@@ -2118,7 +2143,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                 backgroundColor: DeliveryKhataApp.primaryGray,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              child: const Text('Place Order + Share WhatsApp Picture Bill', style: TextStyle(color: Colors.white, fontSize: 16)),
+              child: const Text('Place Order + Send WhatsApp', style: TextStyle(color: Colors.white, fontSize: 16)),
             ),
           ],
         ),
