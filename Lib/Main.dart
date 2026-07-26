@@ -7,7 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:screenshot/screenshot.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:gal/gal.dart';
 
 // ==========================================
 // 1. MODELS & DATA STRUCTURES
@@ -532,7 +532,7 @@ class DeliveryKhataApp extends StatelessWidget {
 }
 
 // ==========================================
-// UTILITY: DIRECT WHATSAPP CHAT + INVOICE SAVER
+// UTILITY: DIRECT WHATSAPP CHAT + INVOICE SAVER (USING GAL)
 // ==========================================
 
 Future<void> sendDirectWhatsAppInvoice({
@@ -556,10 +556,9 @@ Future<void> sendDirectWhatsAppInvoice({
       delay: const Duration(milliseconds: 100),
     );
 
-    // 2. Save image to Gallery so it appears in WhatsApp Recent attachments
-    await ImageGallerySaver.saveImage(
+    // 2. Save image to Gallery using gal package
+    await Gal.putImageBytes(
       imageBytes,
-      quality: 100,
       name: "Invoice_${DateTime.now().millisecondsSinceEpoch}",
     );
 
@@ -593,6 +592,11 @@ Future<void> sendDirectWhatsAppInvoice({
     }
   } catch (e) {
     debugPrint("Error opening WhatsApp direct chat: $e");
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ایرر: $e')),
+      );
+    }
   }
 }
 
