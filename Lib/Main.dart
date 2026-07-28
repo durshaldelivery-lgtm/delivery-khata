@@ -9,6 +9,9 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
 
+// Global ScreenshotController instance for seamless cross-widget capturing
+final ScreenshotController globalScreenshotController = ScreenshotController();
+
 // ==========================================
 // 1. MODELS & DATA STRUCTURES
 // ==========================================
@@ -147,7 +150,7 @@ class DeliveryOrder {
       customerName: map['customerName'] ?? '',
       phoneNumber: map['phoneNumber'] ?? '',
       customerAddress: map['customerAddress'] ?? '',
-      items: (map['items'] as List? ?? []).map((x) => OrderItem.fromMap(x)).toList(),
+      items: (map['items'] as List? ?? []).map((x) => OrderItem.fromMap(Map<String, dynamic>.from(x))).toList(),
       deliveryCharges: (map['deliveryCharges'] as num?)?.toDouble() ?? 0.0,
       totalAmount: (map['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paidAmount: (map['paidAmount'] as num?)?.toDouble() ?? 0.0,
@@ -155,7 +158,7 @@ class DeliveryOrder {
       paymentMode: map['paymentMode'] ?? 'Cash',
       status: map['status'] ?? 'Paid',
       dateTime: DateTime.parse(map['dateTime']),
-      paymentHistory: (map['paymentHistory'] as List? ?? []).map((x) => PaymentReceipt.fromMap(x)).toList(),
+      paymentHistory: (map['paymentHistory'] as List? ?? []).map((x) => PaymentReceipt.fromMap(Map<String, dynamic>.from(x))).toList(),
     );
   }
 }
@@ -617,7 +620,10 @@ class AuthWrapper extends StatelessWidget {
         if (!state.isAuthenticated) {
           return const EnterPinScreen();
         }
-        return const MainHomeScreen();
+        return Screenshot(
+          controller: globalScreenshotController,
+          child: const MainHomeScreen(),
+        );
       },
     );
   }
@@ -1320,7 +1326,6 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
   Customer? _selectedCustomer;
   String _selectedSourceAccount = 'Cash';
   final _amountController = TextEditingController();
-  final ScreenshotController _screenshotController = ScreenshotController();
 
   @override
   void dispose() {
@@ -1424,7 +1429,7 @@ class _DirectLendingDialogState extends State<DirectLendingDialog> {
               final textCaption = "🚚 Durshal Delivery - Cash Udhar Receipt for ${_selectedCustomer!.name}\nAmount: Rs. ${amt.toStringAsFixed(1)}";
               
               await sendDirectWhatsAppInvoice(
-                screenshotController: _screenshotController,
+                screenshotController: globalScreenshotController,
                 invoiceWidget: invoiceWidget,
                 phone: _selectedCustomer!.phoneNumber,
                 textCaption: textCaption,
@@ -1841,7 +1846,6 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
   Customer? _selectedCustomer;
   final _deliveryChargesController = TextEditingController(text: '0');
   String _selectedPaymentMode = 'Cash';
-  final ScreenshotController _screenshotController = ScreenshotController();
 
   final List<OrderItem> _items = [
     OrderItem(),
@@ -2135,7 +2139,7 @@ class _NewOrderBottomSheetState extends State<NewOrderBottomSheet> {
                   final caption = "🚚 *Durshal Delivery Invoice*\nCustomer: $custName\nTotal Bill: Rs. ${total.toStringAsFixed(1)}";
 
                   await sendDirectWhatsAppInvoice(
-                    screenshotController: _screenshotController,
+                    screenshotController: globalScreenshotController,
                     invoiceWidget: invoiceWidget,
                     phone: phone,
                     textCaption: caption,
