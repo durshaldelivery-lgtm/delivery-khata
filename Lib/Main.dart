@@ -231,6 +231,67 @@ class WalletStateData {
 // 2. STATE MANAGEMENT (HYDRATED BLOC)
 // ==========================================
 
+abstract class KhataEvent {}
+
+class SetPinEvent extends KhataEvent {
+  final String newPin;
+  SetPinEvent(this.newPin);
+}
+
+class AuthenticateEvent extends KhataEvent {
+  final String inputPin;
+  AuthenticateEvent(this.inputPin);
+}
+
+class LogoutEvent extends KhataEvent {}
+
+class AddCustomerEvent extends KhataEvent {
+  final Customer customer;
+  AddCustomerEvent(this.customer);
+}
+
+class EditCustomerEvent extends KhataEvent {
+  final Customer customer;
+  EditCustomerEvent(this.customer);
+}
+
+class DeleteCustomerEvent extends KhataEvent {
+  final String id;
+  DeleteCustomerEvent(this.id);
+}
+
+class AddOrderEvent extends KhataEvent {
+  final DeliveryOrder order;
+  AddOrderEvent(this.order);
+}
+
+class LendMoneyDirectlyEvent extends KhataEvent {
+  final Customer customer;
+  final double amount;
+  final String sourceAccount;
+  LendMoneyDirectlyEvent(this.customer, this.amount, this.sourceAccount);
+}
+
+class SettleUdharOrderEvent extends KhataEvent {
+  final String orderId;
+  final double paymentReceived;
+  final String destinationAccount;
+  SettleUdharOrderEvent(this.orderId, this.paymentReceived, this.destinationAccount);
+}
+
+class TransferFundsEvent extends KhataEvent {
+  final String from;
+  final String to;
+  final double amount;
+  TransferFundsEvent(this.from, this.to, this.amount);
+}
+
+class InjectOrWithdrawMoneyEvent extends KhataEvent {
+  final String account;
+  final double amount;
+  InjectOrWithdrawMoneyEvent(this.account, this.amount);
+}
+
 class KhataState {
   final String? pin;
   final bool isAuthenticated;
@@ -292,184 +353,215 @@ class KhataState {
   }
 }
 
-class KhataBloc extends HydratedCubit<KhataState> {
-  KhataBloc() : super(KhataState.initial());
+class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
+  KhataBloc() : super(KhataState.initial()) {
+    on<SetPinEvent>((event, emit) {
+      emit(state.copyWith(pin: event.newPin, isAuthenticated: true));
+    });
 
-  void setPin(String newPin) {
-    emit(state.copyWith(pin: newPin, isAuthenticated: true));
+    on<AuthenticateEvent>((event, emit) {
+      if (state.pin == event.inputPin) {
+        emit(state.copyWith(isAuthenticated: true));
+      }
+    });
+
+    on<LogoutEvent>((event, emit) {
+      emit(state.copyWith(isAuthenticated: false));
+    });
+
+    on<AddCustomerEvent>((event, emit) {
+      final updatedList = List<Customer>.from(state.customers)..add(event.customer);
+      emit(state.copyWith(customers: updatedList));
+    });
+
+    on<EditCustomerEvent>((event, emit) {
+      final updatedList = state.customers.map((c) => c.id == event.customer.id ? event.customer : c).toList();
+      emit(state.copyWith(customers: updatedList));
+    });
+
+    on<DeleteCustomerEvent>((event, emit) {
+      final updatedList = state.customers.where((c) => c.id != event.id).toList();
+      emit(state.copyWith(customers: updatedList));
+    });
+
+    on<AddOrderEvent>((event, emit) {
+      final order = event.order;
+      final updatedOrders = List<DeliveryOrder>.from(state.orders)..insert(0, order);
+      
+      double c = state.wallet.cash;
+      double b = state.wallet.bank;
+      double ep = state.wallet.easyPaisa;
+      double jc = state.wallet.jazzCash;
+
+      if (order.status == 'Paid' && order.paidAmount > 0) {
+        switch (order.paymentMode) {
+          case 'Cash': c += order.paidAmount; break;
+          case 'Bank': b += order.paidAmount; break;
+          case 'EasyPaisa': ep += order.paidAmount; break;
+          case 'JazzCash': jc += order.paidAmount; break;
+        }
+      }
+
+      emit(state.copyWith(
+        orders: updatedOrders,
+        wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+      ));
+    });
+
+    on<LendMoneyDirectlyEvent>((event, emit) {
+      double c = state.wallet.cash;
+      double b = state.wallet.bank;
+      double ep = state.wallet.easyPaisa;
+      double jc = state.wallet.jazzCash;
+
+      switch (event.sourceAccount) {
+        case 'Cash': c -= event.amount; break;
+        case 'Bank': b -= event.amount; break;
+        case 'EasyPaisa': ep -= event.amount; break;
+        case 'JazzCash': jc -= event.amount; break;
+      }
+
+      final udharOrder = DeliveryOrder(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        customerName: event.customer.name,
+        phoneNumber: event.customer.phoneNumber,
+        customerAddress: event.customer.address,
+        items: [OrderItem(name: 'Direct Cash Lending (${event.sourceAccount})', quantity: 1, price: event.amount)],
+        deliveryCharges: 0.0,
+        totalAmount: event.amount,
+        paidAmount: 0.0,
+        remainingAmount: event.amount,
+        paymentMode: 'Udhar (${event.sourceAccount})',
+        status: 'Udhar',
+        dateTime: DateTime.now(),
+      );
+
+      final updatedOrders = List<DeliveryOrder>.from(state.orders)..insert(0, udharOrder);
+
+      emit(state.copyWith(
+        orders: updatedOrders,
+        wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+      ));
+    });
+
+    on<SettleUdharOrderEvent>((event, emit) {
+      double c = state.wallet.cash;
+      double b = state.wallet.bank;
+      double ep = state.wallet.easyPaisa;
+      double jc = state.wallet.jazzCash;
+
+      switch (event.destinationAccount) {
+        case 'Cash': c += event.paymentReceived; break;
+        case 'Bank': b += event.paymentReceived; break;
+        case 'EasyPaisa': ep += event.paymentReceived; break;
+        case 'JazzCash': jc += event.paymentReceived; break;
+      }
+
+      final updatedOrders = state.orders.map((order) {
+        if (order.id == event.orderId) {
+          final newPaid = order.paidAmount + event.paymentReceived;
+          final newRemaining = order.totalAmount - newPaid;
+          final finalRemaining = newRemaining > 0 ? newRemaining : 0.0;
+          final newStatus = finalRemaining == 0 ? 'Paid' : 'Udhar';
+
+          final newReceipt = PaymentReceipt(
+            amount: event.paymentReceived,
+            sourceAccount: event.destinationAccount,
+            dateTime: DateTime.now(),
+          );
+
+          final updatedHistory = List<PaymentReceipt>.from(order.paymentHistory)..add(newReceipt);
+
+          return order.copyWith(
+            paidAmount: newPaid,
+            remainingAmount: finalRemaining,
+            status: newStatus,
+            paymentHistory: updatedHistory,
+          );
+        }
+        return order;
+      }).toList();
+
+      emit(state.copyWith(
+        orders: updatedOrders,
+        wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+      ));
+    });
+
+    on<TransferFundsEvent>((event, emit) {
+      double c = state.wallet.cash;
+      double b = state.wallet.bank;
+      double ep = state.wallet.easyPaisa;
+      double jc = state.wallet.jazzCash;
+
+      switch (event.from) {
+        case 'Cash': c -= event.amount; break;
+        case 'Bank': b -= event.amount; break;
+        case 'EasyPaisa': ep -= event.amount; break;
+        case 'JazzCash': jc -= event.amount; break;
+      }
+      switch (event.to) {
+        case 'Cash': c += event.amount; break;
+        case 'Bank': b += event.amount; break;
+        case 'EasyPaisa': ep += event.amount; break;
+        case 'JazzCash': jc += event.amount; break;
+      }
+
+      emit(state.copyWith(
+        wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+      ));
+    });
+
+    on<InjectOrWithdrawMoneyEvent>((event, emit) {
+      double c = state.wallet.cash;
+      double b = state.wallet.bank;
+      double ep = state.wallet.easyPaisa;
+      double jc = state.wallet.jazzCash;
+
+      switch (event.account) {
+        case 'Cash': c += event.amount; break;
+        case 'Bank': b += event.amount; break;
+        case 'EasyPaisa': ep += event.amount; break;
+        case 'JazzCash': jc += event.amount; break;
+      }
+
+      emit(state.copyWith(
+        wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
+      ));
+    });
   }
+
+  void setPin(String newPin) => add(SetPinEvent(newPin));
 
   bool authenticate(String inputPin) {
     if (state.pin == inputPin) {
-      emit(state.copyWith(isAuthenticated: true));
+      add(AuthenticateEvent(inputPin));
       return true;
     }
     return false;
   }
 
-  void logout() {
-    emit(state.copyWith(isAuthenticated: false));
-  }
+  void logout() => add(LogoutEvent());
 
-  void addCustomer(Customer customer) {
-    final updatedList = List<Customer>.from(state.customers)..add(customer);
-    emit(state.copyWith(customers: updatedList));
-  }
+  void addCustomer(Customer customer) => add(AddCustomerEvent(customer));
 
-  void editCustomer(Customer updatedCustomer) {
-    final updatedList = state.customers.map((c) => c.id == updatedCustomer.id ? updatedCustomer : c).toList();
-    emit(state.copyWith(customers: updatedList));
-  }
+  void editCustomer(Customer updatedCustomer) => add(EditCustomerEvent(updatedCustomer));
 
-  void deleteCustomer(String id) {
-    final updatedList = state.customers.where((c) => c.id != id).toList();
-    emit(state.copyWith(customers: updatedList));
-  }
+  void deleteCustomer(String id) => add(DeleteCustomerEvent(id));
 
-  void addOrder(DeliveryOrder order) {
-    final updatedOrders = List<DeliveryOrder>.from(state.orders)..insert(0, order);
-    
-    double c = state.wallet.cash;
-    double b = state.wallet.bank;
-    double ep = state.wallet.easyPaisa;
-    double jc = state.wallet.jazzCash;
+  void addOrder(DeliveryOrder order) => add(AddOrderEvent(order));
 
-    if (order.status == 'Paid' && order.paidAmount > 0) {
-      switch (order.paymentMode) {
-        case 'Cash': c += order.paidAmount; break;
-        case 'Bank': b += order.paidAmount; break;
-        case 'EasyPaisa': ep += order.paidAmount; break;
-        case 'JazzCash': jc += order.paidAmount; break;
-      }
-    }
+  void lendMoneyDirectly(Customer customer, double amount, String sourceAccount) =>
+      add(LendMoneyDirectlyEvent(customer, amount, sourceAccount));
 
-    emit(state.copyWith(
-      orders: updatedOrders,
-      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
-    ));
-  }
+  void settleUdharOrder(String orderId, double paymentReceived, String destinationAccount) =>
+      add(SettleUdharOrderEvent(orderId, paymentReceived, destinationAccount));
 
-  void lendMoneyDirectly(Customer customer, double amount, String sourceAccount) {
-    double c = state.wallet.cash;
-    double b = state.wallet.bank;
-    double ep = state.wallet.easyPaisa;
-    double jc = state.wallet.jazzCash;
+  void transferFunds(String from, String to, double amount) =>
+      add(TransferFundsEvent(from, to, amount));
 
-    switch (sourceAccount) {
-      case 'Cash': c -= amount; break;
-      case 'Bank': b -= amount; break;
-      case 'EasyPaisa': ep -= amount; break;
-      case 'JazzCash': jc -= amount; break;
-    }
-
-    final udharOrder = DeliveryOrder(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      customerName: customer.name,
-      phoneNumber: customer.phoneNumber,
-      customerAddress: customer.address,
-      items: [OrderItem(name: 'Direct Cash Lending ($sourceAccount)', quantity: 1, price: amount)],
-      deliveryCharges: 0.0,
-      totalAmount: amount,
-      paidAmount: 0.0,
-      remainingAmount: amount,
-      paymentMode: 'Udhar ($sourceAccount)',
-      status: 'Udhar',
-      dateTime: DateTime.now(),
-    );
-
-    final updatedOrders = List<DeliveryOrder>.from(state.orders)..insert(0, udharOrder);
-
-    emit(state.copyWith(
-      orders: updatedOrders,
-      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
-    ));
-  }
-
-  void settleUdharOrder(String orderId, double paymentReceived, String destinationAccount) {
-    double c = state.wallet.cash;
-    double b = state.wallet.bank;
-    double ep = state.wallet.easyPaisa;
-    double jc = state.wallet.jazzCash;
-
-    switch (destinationAccount) {
-      case 'Cash': c += paymentReceived; break;
-      case 'Bank': b += paymentReceived; break;
-      case 'EasyPaisa': ep += paymentReceived; break;
-      case 'JazzCash': jc += paymentReceived; break;
-    }
-
-    final updatedOrders = state.orders.map((order) {
-      if (order.id == orderId) {
-        final newPaid = order.paidAmount + paymentReceived;
-        final newRemaining = order.totalAmount - newPaid;
-        final finalRemaining = newRemaining > 0 ? newRemaining : 0.0;
-        final newStatus = finalRemaining == 0 ? 'Paid' : 'Udhar';
-
-        final newReceipt = PaymentReceipt(
-          amount: paymentReceived,
-          sourceAccount: destinationAccount,
-          dateTime: DateTime.now(),
-        );
-
-        final updatedHistory = List<PaymentReceipt>.from(order.paymentHistory)..add(newReceipt);
-
-        return order.copyWith(
-          paidAmount: newPaid,
-          remainingAmount: finalRemaining,
-          status: newStatus,
-          paymentHistory: updatedHistory,
-        );
-      }
-      return order;
-    }).toList();
-
-    emit(state.copyWith(
-      orders: updatedOrders,
-      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
-    ));
-  }
-
-  void transferFunds(String from, String to, double amount) {
-    double c = state.wallet.cash;
-    double b = state.wallet.bank;
-    double ep = state.wallet.easyPaisa;
-    double jc = state.wallet.jazzCash;
-
-    switch (from) {
-      case 'Cash': c -= amount; break;
-      case 'Bank': b -= amount; break;
-      case 'EasyPaisa': ep -= amount; break;
-      case 'JazzCash': jc -= amount; break;
-    }
-    switch (to) {
-      case 'Cash': c += amount; break;
-      case 'Bank': b += amount; break;
-      case 'EasyPaisa': ep += amount; break;
-      case 'JazzCash': jc += amount; break;
-    }
-
-    emit(state.copyWith(
-      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
-    ));
-  }
-
-  void injectOrWithdrawMoney(String account, double amount) {
-    double c = state.wallet.cash;
-    double b = state.wallet.bank;
-    double ep = state.wallet.easyPaisa;
-    double jc = state.wallet.jazzCash;
-
-    switch (account) {
-      case 'Cash': c += amount; break;
-      case 'Bank': b += amount; break;
-      case 'EasyPaisa': ep += amount; break;
-      case 'JazzCash': jc += amount; break;
-    }
-
-    emit(state.copyWith(
-      wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
-    ));
-  }
+  void injectOrWithdrawMoney(String account, double amount) =>
+      add(InjectOrWithdrawMoneyEvent(account, amount));
 
   @override
   KhataState? fromJson(Map<String, dynamic> json) => KhataState.fromMap(json);
