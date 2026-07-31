@@ -1081,11 +1081,25 @@ class _SettleUdharDialogState extends State<SettleUdharDialog> {
 }
 
 // ==========================================
-// 7. CUSTOMERS TAB
+// 7. CUSTOMERS TAB (WITH REAL-TIME SEARCH)
 // ==========================================
 
-class CustomersScreen extends StatelessWidget {
+class CustomersScreen extends StatefulWidget {
   const CustomersScreen({super.key});
+
+  @override
+  State<CustomersScreen> createState() => _CustomersScreenState();
+}
+
+class _CustomersScreenState extends State<CustomersScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   void _openAddCustomerDialog(BuildContext context, {Customer? customerToEdit}) {
     showDialog(
@@ -1100,76 +1114,132 @@ class CustomersScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Customers Directory')),
       body: BlocBuilder<KhataBloc, KhataState>(
         builder: (context, state) {
-          if (state.customers.isEmpty) {
-            return const Center(child: Text('No customers registered. Tap + to add one.'));
-          }
+          // Filter customer list based on query (by Name or Phone Number)
+          final filteredCustomers = state.customers.where((c) {
+            final query = _searchQuery.toLowerCase().trim();
+            final nameMatch = c.name.toLowerCase().contains(query);
+            final phoneMatch = c.phoneNumber.contains(query);
+            return nameMatch || phoneMatch;
+          }).toList();
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: state.customers.length,
-            itemBuilder: (context, index) {
-              final c = state.customers[index];
-              return Card(
-                elevation: 1.5,
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                child: ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: DeliveryKhataApp.primaryGray,
-                    child: Icon(Icons.person, color: Colors.white),
+          return Column(
+            children: [
+              // Search Input Field
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search by name or phone...',
+                    prefixIcon: const Icon(Icons.search, color: DeliveryKhataApp.primaryGray),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, color: Colors.grey),
+                            onPressed: () {
+                              setState(() {
+                                _searchController.clear();
+                                _searchQuery = '';
+                              });
+                            },
+                          )
+                        : null,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: DeliveryKhataApp.primaryGray, width: 2),
+                    ),
                   ),
-                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('Phone: ${c.phoneNumber}\nAddress: ${c.address}'),
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        _openAddCustomerDialog(context, customerToEdit: c);
-                      } else if (value == 'delete') {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Delete Customer'),
-                            content: Text('Are you sure you want to delete ${c.name}?'),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                              ElevatedButton(
-                                onPressed: () {
-                                  context.read<KhataBloc>().deleteCustomer(c.id);
-                                  Navigator.pop(ctx);
-                                },
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                child: const Text('Delete', style: TextStyle(color: Colors.white)),
-                              )
-                            ],
-                          ),
-                        );
-                      }
-                    },
-                    itemBuilder: (BuildContext context) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit, color: Colors.blue, size: 20),
-                            SizedBox(width: 8),
-                            Text('Edit'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete, color: Colors.red, size: 20),
-                            SizedBox(width: 8),
-                            Text('Delete'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
                 ),
-              );
-            },
+              ),
+
+              // Customer List Output
+              Expanded(
+                child: state.customers.isEmpty
+                    ? const Center(child: Text('No customers registered. Tap + to add one.'))
+                    : filteredCustomers.isEmpty
+                        ? const Center(child: Text('No matching customers found.'))
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(12),
+                            itemCount: filteredCustomers.length,
+                            itemBuilder: (context, index) {
+                              final c = filteredCustomers[index];
+                              return Card(
+                                elevation: 1.5,
+                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                child: ListTile(
+                                  leading: const CircleAvatar(
+                                    backgroundColor: DeliveryKhataApp.primaryGray,
+                                    child: Icon(Icons.person, color: Colors.white),
+                                  ),
+                                  title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  subtitle: Text('Phone: ${c.phoneNumber}\nAddress: ${c.address}'),
+                                  trailing: PopupMenuButton<String>(
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
+                                        _openAddCustomerDialog(context, customerToEdit: c);
+                                      } else if (value == 'delete') {
+                                        showDialog(
+                                          context: context,
+                                          builder: (ctx) => AlertDialog(
+                                            title: const Text('Delete Customer'),
+                                            content: Text('Are you sure you want to delete ${c.name}?'),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(ctx),
+                                                child: const Text('Cancel'),
+                                              ),
+                                              ElevatedButton(
+                                                onPressed: () {
+                                                  context.read<KhataBloc>().deleteCustomer(c.id);
+                                                  Navigator.pop(ctx);
+                                                },
+                                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                                child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                                              )
+                                            ],
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    itemBuilder: (BuildContext context) => [
+                                      const PopupMenuItem(
+                                        value: 'edit',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.edit, color: Colors.blue, size: 20),
+                                            SizedBox(width: 8),
+                                            Text('Edit'),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.delete, color: Colors.red, size: 20),
+                                            SizedBox(width: 8),
+                                            Text('Delete'),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
           );
         },
       ),
