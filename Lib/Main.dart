@@ -8,6 +8,9 @@ import 'package:intl/intl.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:gal/gal.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 // Global ScreenshotController instance for seamless cross-widget capturing
 final ScreenshotController globalScreenshotController = ScreenshotController();
@@ -228,7 +231,7 @@ class WalletStateData {
 }
 
 // ==========================================
-// 2. STATE MANAGEMENT (HYDRATED BLOC)
+// 2. STATE MANAGEMENT (HYDRATED BLOC + FIREBASE CLOUD SYNC)
 // ==========================================
 
 abstract class KhataEvent {}
@@ -244,6 +247,11 @@ class AuthenticateEvent extends KhataEvent {
 }
 
 class LogoutEvent extends KhataEvent {}
+
+class RestoreStateFromCloudEvent extends KhataEvent {
+  final KhataState cloudState;
+  RestoreStateFromCloudEvent(this.cloudState);
+}
 
 class AddCustomerEvent extends KhataEvent {
   final Customer customer;
@@ -355,33 +363,45 @@ class KhataState {
 
 class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
   KhataBloc() : super(KhataState.initial()) {
-    on<SetPinEvent>((event, emit) {
+    on<SetPinEvent>((event, emit) async {
       emit(state.copyWith(pin: event.newPin, isAuthenticated: true));
+      await _syncAuthAndFirestore(event.newPin);
+      _saveToCloud();
     });
 
-    on<AuthenticateEvent>((event, emit) {
+    on<AuthenticateEvent>((event, emit) async {
       if (state.pin == event.inputPin) {
         emit(state.copyWith(isAuthenticated: true));
+        await _syncAuthAndFirestore(event.inputPin);
+        _saveToCloud();
       }
     });
 
-    on<LogoutEvent>((event, emit) {
+    on<LogoutEvent>((event, emit) async {
+      await FirebaseAuth.instance.signOut();
       emit(state.copyWith(isAuthenticated: false));
+    });
+
+    on<RestoreStateFromCloudEvent>((event, emit) {
+      emit(event.cloudState.copyWith(isAuthenticated: true));
     });
 
     on<AddCustomerEvent>((event, emit) {
       final updatedList = List<Customer>.from(state.customers)..add(event.customer);
       emit(state.copyWith(customers: updatedList));
+      _saveToCloud();
     });
 
     on<EditCustomerEvent>((event, emit) {
       final updatedList = state.customers.map((c) => c.id == event.customer.id ? event.customer : c).toList();
       emit(state.copyWith(customers: updatedList));
+      _saveToCloud();
     });
 
     on<DeleteCustomerEvent>((event, emit) {
       final updatedList = state.customers.where((c) => c.id != event.id).toList();
       emit(state.copyWith(customers: updatedList));
+      _saveToCloud();
     });
 
     on<AddOrderEvent>((event, emit) {
@@ -406,6 +426,7 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
         orders: updatedOrders,
         wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
       ));
+      _saveToCloud();
     });
 
     on<LendMoneyDirectlyEvent>((event, emit) {
@@ -442,6 +463,7 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
         orders: updatedOrders,
         wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
       ));
+      _saveToCloud();
     });
 
     on<SettleUdharOrderEvent>((event, emit) {
@@ -486,6 +508,7 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
         orders: updatedOrders,
         wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
       ));
+      _saveToCloud();
     });
 
     on<TransferFundsEvent>((event, emit) {
@@ -510,6 +533,7 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
       emit(state.copyWith(
         wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
       ));
+      _saveToCloud();
     });
 
     on<InjectOrWithdrawMoneyEvent>((event, emit) {
@@ -528,7 +552,56 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
       emit(state.copyWith(
         wallet: WalletStateData(cash: c, bank: b, easyPaisa: ep, jazzCash: jc),
       ));
+      _saveToCloud();
     });
+  }
+
+  // Authenticately Links PIN to Free Firebase Account & Restores Cloud State
+  Future<void> _syncAuthAndFirestore(String pin) async {
+    try {
+      final email = "user_$pin@deliverykhata.local";
+      final password = "khata_pin_$pin";
+      UserCredential userCredential;
+
+      try {
+        userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } catch (_) {
+        userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
+
+      final uid = userCredential.user?.uid;
+      if (uid != null) {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        if (doc.exists && doc.data() != null) {
+          final cloudData = doc.data()!;
+          final restoredState = KhataState.fromMap(cloudData);
+          add(RestoreStateFromCloudEvent(restoredState));
+        }
+      }
+    } catch (e) {
+      debugPrint("Firebase Auth/Firestore sync error: $e");
+    }
+  }
+
+  // Automatically Syncs App Ledger Changes to Firestore Cloud
+  Future<void> _saveToCloud() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+          state.toMap(),
+          SetOptions(merge: true),
+        );
+      }
+    } catch (e) {
+      debugPrint("Firestore write error: $e");
+    }
   }
 
   void setPin(String newPin) => add(SetPinEvent(newPin));
@@ -576,6 +649,7 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   HydratedBloc.storage = await HydratedStorage.build(
     storageDirectory: await getApplicationDocumentsDirectory(),
   );
