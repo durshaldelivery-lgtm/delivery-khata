@@ -770,7 +770,7 @@ Future<void> sendDirectWhatsAppInvoice({
 }
 
 // ==========================================
-// 4. AUTHENTICATION & PIN SCREENS
+// 4. AUTHENTICATION & FIREBASE SIGN IN
 // ==========================================
 
 class AuthWrapper extends StatelessWidget {
@@ -778,150 +778,164 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<KhataBloc, KhataState>(
-      builder: (context, state) {
-        if (state.pin == null || state.pin!.isEmpty) {
-          return const CreatePinScreen();
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
-        if (!state.isAuthenticated) {
-          return const EnterPinScreen();
+        if (snapshot.hasData) {
+          return const MainHomeScreen();
         }
-        return const MainHomeScreen();
+        return const FirebaseSignInScreen();
       },
     );
   }
 }
 
-class CreatePinScreen extends StatefulWidget {
-  const CreatePinScreen({super.key});
+class FirebaseSignInScreen extends StatefulWidget {
+  const FirebaseSignInScreen({super.key});
 
   @override
-  State<CreatePinScreen> createState() => _CreatePinScreenState();
+  State<FirebaseSignInScreen> createState() => _FirebaseSignInScreenState();
 }
 
-class _CreatePinScreenState extends State<CreatePinScreen> {
-  final _pinController = TextEditingController();
-  final _confirmPinController = TextEditingController();
+class _FirebaseSignInScreenState extends State<FirebaseSignInScreen> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLoading = false;
+  bool _isSignUp = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
-    _pinController.dispose();
-    _confirmPinController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _submitAuth() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+
+      if (email.isEmpty || password.isEmpty) {
+        setState(() {
+          _errorMessage = "Please enter both email and password.";
+          _isLoading = false;
+        });
+        return;
+      }
+
+      if (_isSignUp) {
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } else {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _errorMessage = e.message ?? "Authentication failed.";
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = "An unexpected error occurred.";
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Security Setup')),
-      body: Padding(
+      appBar: AppBar(title: Text(_isSignUp ? 'Create Account' : 'Sign In')),
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.security, size: 70, color: DeliveryKhataApp.primaryGray),
+            const SizedBox(height: 40),
+            const Icon(Icons.lock_outline, size: 70, color: DeliveryKhataApp.primaryGray),
             const SizedBox(height: 20),
-            const Text(
-              'Select your PIN & remember for future use',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Text(
+              _isSignUp ? 'Create Your Account' : 'Welcome Back',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
             TextField(
-              controller: _pinController,
-              keyboardType: TextInputType.number,
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email Address',
+                prefixIcon: Icon(Icons.email_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _passwordController,
               obscureText: true,
-              maxLength: 4,
-              decoration: const InputDecoration(labelText: 'Enter 4-Digit PIN', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                prefixIcon: Icon(Icons.lock_outline),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_errorMessage != null) ...[
+              Text(
+                _errorMessage!,
+                style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+            ],
+            ElevatedButton(
+              onPressed: _isLoading ? null : _submitAuth,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: DeliveryKhataApp.primaryGray,
+                minimumSize: const Size.fromHeight(50),
+              ),
+              child: _isLoading
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : Text(
+                      _isSignUp ? 'Sign Up' : 'Sign In',
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _confirmPinController,
-              keyboardType: TextInputType.number,
-              obscureText: true,
-              maxLength: 4,
-              decoration: const InputDecoration(labelText: 'Confirm 4-Digit PIN', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
+            TextButton(
               onPressed: () {
-                if (_pinController.text.length == 4 && _pinController.text == _confirmPinController.text) {
-                  context.read<KhataBloc>().setPin(_pinController.text);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('PINs do not match or are invalid.')),
-                  );
-                }
+                setState(() {
+                  _isSignUp = !_isSignUp;
+                  _errorMessage = null;
+                });
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: DeliveryKhataApp.primaryGray,
-                minimumSize: const Size.fromHeight(50),
+              child: Text(
+                _isSignUp
+                    ? 'Already have an account? Sign In'
+                    : "Don't have an account? Sign Up",
+                style: const TextStyle(color: DeliveryKhataApp.accentOrange),
               ),
-              child: const Text('Save Security PIN', style: TextStyle(color: Colors.white, fontSize: 16)),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class EnterPinScreen extends StatefulWidget {
-  const EnterPinScreen({super.key});
-
-  @override
-  State<EnterPinScreen> createState() => _EnterPinScreenState();
-}
-
-class _EnterPinScreenState extends State<EnterPinScreen> {
-  final _pinController = TextEditingController();
-
-  @override
-  void dispose() {
-    _pinController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Security Verification')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.lock, size: 70, color: DeliveryKhataApp.primaryGray),
-            const SizedBox(height: 20),
-            const Text(
-              'Please enter your security PIN to access Delivery Khata',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _pinController,
-              keyboardType: TextInputType.number,
-              obscureText: true,
-              maxLength: 4,
-              decoration: const InputDecoration(labelText: 'Enter Security PIN', border: OutlineInputBorder()),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                final success = context.read<KhataBloc>().authenticate(_pinController.text);
-                if (!success) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Incorrect Security PIN.')),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: DeliveryKhataApp.primaryGray,
-                minimumSize: const Size.fromHeight(50),
-              ),
-              child: const Text('Unlock App', style: TextStyle(color: Colors.white, fontSize: 16)),
-            )
           ],
         ),
       ),
@@ -1000,7 +1014,7 @@ class DeliveriesScreen extends StatelessWidget {
         title: const Text('Durshal Delivery'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.lock_outline),
+            icon: const Icon(Icons.logout),
             onPressed: () => context.read<KhataBloc>().logout(),
           )
         ],
