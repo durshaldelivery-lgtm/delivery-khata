@@ -712,7 +712,7 @@ Future<void> sendDirectWhatsAppInvoice({
   required BuildContext context,
 }) async {
   try {
-    // 1. Capture image from widget
+    // 1. Capture image from widget directly in memory
     final imageBytes = await screenshotController.captureFromWidget(
       Material(
         child: Container(
@@ -786,10 +786,7 @@ class AuthWrapper extends StatelessWidget {
         if (!state.isAuthenticated) {
           return const EnterPinScreen();
         }
-        return Screenshot(
-          controller: globalScreenshotController,
-          child: const MainHomeScreen(),
-        );
+        return const MainHomeScreen();
       },
     );
   }
