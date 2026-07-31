@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hydrated_bloc/hydrated_bloc.dart';
@@ -649,10 +650,25 @@ class KhataBloc extends HydratedBloc<KhataEvent, KhataState> {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  HydratedBloc.storage = await HydratedStorage.build(
-    storageDirectory: await getApplicationDocumentsDirectory(),
-  );
+
+  // Safely initialize Firebase without halting on boot errors
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    debugPrint("Firebase initialization error: $e");
+  }
+
+  // Safely initialize HydratedStorage to fix unhandled storage exception (White Screen Cause)
+  try {
+    HydratedBloc.storage = await HydratedStorage.build(
+      storageDirectory: kIsWeb
+          ? HydratedStorage.webStorageDirectory
+          : await getApplicationDocumentsDirectory(),
+    );
+  } catch (e) {
+    debugPrint("HydratedBloc Storage initialization error: $e");
+  }
+
   runApp(const DeliveryKhataApp());
 }
 
