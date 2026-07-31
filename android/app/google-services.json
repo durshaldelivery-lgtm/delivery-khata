@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "379109505863",
+    "project_id": "delivery-khata-93180",
+    "storage_bucket": "delivery-khata-93180.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:379109505863:android:f96d9c0ad5b40c6b222a62",
+        "android_client_info": {
+          "package_name": "com.example.delivery_khata"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAkLYO2kaSxEK996GrFizGjVmcImX3I3fo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
